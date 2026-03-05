@@ -1,0 +1,32 @@
+# large assets
+*.stl
+*.blend
+
+# third-party
+sofa_plugins/
+
+# build artifacts
+build/
+install/
+log/
+
+# Docker
+*.log
+*.pid
+docker-compose.override.yml
+.env
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# OS / host artifacts
+.DS_Store
+Thumbs.db
+
+# Python / ROS2 Python packages
+__pycache__/
+*.pyc
+
+# Misc
+*.pdf
