@@ -1,6 +1,9 @@
 # large assets
 *.stl
 *.blend
+*.blend1
+*.obj
+*.mtl
 
 # third-party
 sofa_plugins/
