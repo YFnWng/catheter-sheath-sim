@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import os
+import yaml
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -16,40 +20,30 @@ from useful.params import (  # type: ignore
 
 from utils.cable_utils import compute_cable_points
 
-# ---------------------------------------------------------------------------
-# Catheter parameters
-# ---------------------------------------------------------------------------
-CATHETER_LENGTH = 160.0          # mm
-CATHETER_SECTIONS = 32
-CATHETER_FRAMES = 64
-CATHETER_RADIUS = 1.45           # mm
-CATHETER_MASS = 0.04             # kg
-CATHETER_YOUNG_MODULUS = 8.0e5   # Pa
-CATHETER_POISSON = 0.38
-CATHETER_RAYLEIGH = 0.05
+_DEFAULT_CONFIG = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "configs", "catheter_ablation.yaml",
+)
 
-# In Cosserat prefab, the rod is along the local X axis. We use the convention that 
-# the rod is along the local Z axis. So there are two rotations applied to the prefab:
-# 1) Rotate -90 degrees about local Y to align rod with local Z.
-# 2) A global rotation to set the home orientation of the catheter.
-CATHETER_BASE_POSITION = [0.0, 0.0, -CATHETER_LENGTH]
-CATHETER_BASE_ORIENTATION = R.from_euler("xyz", [0.0, 0.0, 0.0], degrees=True)
-PREFAB_ROTATION_OFFSET = R.from_euler("xyz", [0.0, -90.0, 0.0], degrees=True)
-CATHETER_INSERTION_DIRECTION = [0.0, 0.0, 1.0] # In local frame
-CATHETER_INSERTION_SPEED = 30.0  # mm/s
-CATHETER_MAX_TRAVEL = 160.0      # mm
-CATHETER_ROTATION_SPEED = 30.0   # deg/s
-CATHETER_MAX_ROTATION = 180.0    # degrees
 
-CABLE_OFFSET = 1.4               # mm lateral offset from centreline
-CABLE_POINT_COUNT = 16
-CABLE_PULL_INCREMENT = 3.0       # mm/s
-CABLE_PULL_MIN = 0.0
-CABLE_PULL_MAX = 30.0
+def _load_config(path: str) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f)
 
 
 class CatheterRobot:
     """Tendon-driven Cosserat rod catheter with a single actuation cable.
+
+    Parameters
+    ----------
+    root:
+        The SOFA root node.
+    config_path:
+        Path to the catheter YAML config file.  Defaults to
+        ``simulation/configs/catheter_ablation.yaml`` next to this file.
+    cable_mode:
+        ``"displacement"`` (default) or ``"force"`` — passed to
+        ``PullingCable(valueType=...)``.
 
     After construction the following attributes are available for wiring up
     controllers and contact listeners:
@@ -64,8 +58,11 @@ class CatheterRobot:
         Home position of the catheter base [x, y, z] (mm).
     base_orientation : list[float]
         Home orientation of the catheter base as quaternion [qx,qy,qz,qw].
+    prefab_rotation_offset : list[float]
+        Quaternion [qx,qy,qz,qw] of the rotation applied to align the Cosserat
+        prefab local-X rod axis with the scene local-Z convention.
     insertion_direction : list[float]
-        Unit vector along which the catheter is inserted.
+        Unit vector along which the catheter is inserted (local frame).
     joint_rate : list[float]
         Rates for [insertion (mm/s), rotation (deg/s), cable (mm/s)].
     joint_upper_limits : list[float]
@@ -76,28 +73,52 @@ class CatheterRobot:
         SOFA link path to the catheter PointCollisionModel.
     """
 
-    def __init__(self, root: Sofa.Core.Node) -> None:
-        self._prefab, self._collision, self.cable_constraint = _build(root)
+    def __init__(
+        self,
+        root: Sofa.Core.Node,
+        config_path: str = _DEFAULT_CONFIG,
+        cable_mode: str = "displacement",
+    ) -> None:
+        cfg = _load_config(config_path)
+        robot_cfg = cfg.get("robot", {})
+        act_cfg = cfg.get("actuation", {})
+        ctrl_cfg = cfg.get("controller", {})
+
+        self._prefab, self._collision, self.cable_constraint = _build(
+            root, robot_cfg, act_cfg, cable_mode=cable_mode
+        )
         self.base_mo = self._prefab.rigidBaseNode.RigidBaseMO  # type: ignore[attr-defined]
 
-        self.base_position: List[float] = list(CATHETER_BASE_POSITION)
-        self.base_orientation: List[float] = list(CATHETER_BASE_ORIENTATION.as_quat().tolist())
-        self.prefab_rotation_offset: List[float]  = PREFAB_ROTATION_OFFSET.as_quat().tolist()
-        self.insertion_direction: List[float] = list(CATHETER_INSERTION_DIRECTION)
+        self.base_position: List[float] = list(robot_cfg["base_position"])
+        base_home_orientation = R.from_euler(
+            "xyz",
+            robot_cfg.get("base_orientation_euler_xyz_deg", [0.0, 0.0, 0.0]),
+            degrees=True,
+        )
+        self.base_orientation: List[float] = base_home_orientation.as_quat().tolist()
+        prefab_rotation = R.from_euler(
+            "xyz",
+            robot_cfg.get("prefab_rotation_euler_xyz_deg", [0.0, -90.0, 0.0]),
+            degrees=True,
+        )
+        self.prefab_rotation_offset: List[float] = prefab_rotation.as_quat().tolist()
+        self.insertion_direction: List[float] = list(
+            ctrl_cfg.get("insertion_direction", [0.0, 0.0, 1.0])
+        )
         self.joint_rate: List[float] = [
-            CATHETER_INSERTION_SPEED,
-            CATHETER_ROTATION_SPEED,
-            CABLE_PULL_INCREMENT,
+            float(ctrl_cfg.get("insertion_speed", 30.0)),
+            float(ctrl_cfg.get("rotation_speed", 30.0)),
+            float(act_cfg.get("pull_increment", 3.0)),
         ]
         self.joint_upper_limits: List[float] = [
-            CATHETER_MAX_TRAVEL,
-            CATHETER_MAX_ROTATION,
-            CABLE_PULL_MAX,
+            float(ctrl_cfg.get("max_travel", 160.0)),
+            float(ctrl_cfg.get("max_rotation", 180.0)),
+            float(act_cfg.get("pull_max", 30.0)),
         ]
         self.joint_lower_limits: List[float] = [
             0.0,
-            -CATHETER_MAX_ROTATION,
-            CABLE_PULL_MIN,
+            -float(ctrl_cfg.get("max_rotation", 180.0)),
+            float(act_cfg.get("pull_min", 0.0)),
         ]
 
     @property
@@ -111,11 +132,15 @@ class CatheterRobot:
 
 def _build(
     root: Sofa.Core.Node,
+    robot_cfg: dict,
+    act_cfg: dict,
+    cable_mode: str = "displacement",
 ) -> Tuple[CosseratBase, Sofa.Core.Node, Optional[Sofa.Core.Object]]:
     solver_node = root.addChild("CatheterSimulation")
+    rayleigh = float(robot_cfg.get("rayleigh", 0.05))
     solver_node.addObject(
         "EulerImplicitSolver",
-        rayleighStiffness=CATHETER_RAYLEIGH,
+        rayleighStiffness=rayleigh,
         rayleighMass=1e-3,
     )
     solver_node.addObject(
@@ -125,18 +150,27 @@ def _build(
     )
     solver_node.addObject("GenericConstraintCorrection")
 
-    params = _build_params()
-    # CosseratBase is a Sofa.Prefab: passing parent= registers it as a child
-    # of solver_node automatically.  Do NOT also wrap in addChild() — that
-    # would add the same node twice and trigger a SceneCheckDuplicatedName warning.
+    params = _build_params(robot_cfg)
+
+    base_pos = robot_cfg.get("base_position", [0.0, 0.0, -160.0])
+    base_orient = R.from_euler(
+        "xyz",
+        robot_cfg.get("base_orientation_euler_xyz_deg", [0.0, 0.0, 0.0]),
+        degrees=True,
+    )
+    prefab_rot = R.from_euler(
+        "xyz",
+        robot_cfg.get("prefab_rotation_euler_xyz_deg", [0.0, -90.0, 0.0]),
+        degrees=True,
+    )
     # CosseratBase rotation= expects Euler angles in degrees (3 elements),
     # not a quaternion.  Passing a 4-element quaternion corrupts the heap.
-    prefab_base_rotation = (CATHETER_BASE_ORIENTATION * PREFAB_ROTATION_OFFSET).as_euler("xyz", degrees=True).tolist()
+    prefab_base_rotation = (base_orient * prefab_rot).as_euler("xyz", degrees=True).tolist()
     prefab = CosseratBase(
         parent=solver_node,
         params=params,
         name="catheter",
-        translation=CATHETER_BASE_POSITION,
+        translation=base_pos,
         rotation=prefab_base_rotation,
     )
 
@@ -157,13 +191,20 @@ def _build(
     if hasattr(collision, "CollisionDOFs"):
         collision.CollisionDOFs.showObject = False  # type: ignore[attr-defined]
 
-    cable_constraint = _add_cable(prefab)
+    cable_constraint = _add_cable(prefab, act_cfg, cable_mode=cable_mode)
     return prefab, collision, cable_constraint
 
 
-def _add_cable(prefab: CosseratBase) -> Optional[Sofa.Core.Object]:
+def _add_cable(
+    prefab: CosseratBase,
+    act_cfg: dict,
+    cable_mode: str = "displacement",
+) -> Optional[Sofa.Core.Object]:
+    cable_offset = float(act_cfg.get("cable_offset", 1.4))
+    cable_point_count = int(act_cfg.get("cable_point_count", 16))
+
     frame_states = np.asarray(prefab.frames3D, dtype=float)
-    cable_points = compute_cable_points(frame_states, CABLE_POINT_COUNT, CABLE_OFFSET)
+    cable_points = compute_cable_points(frame_states, cable_point_count, cable_offset)
     if cable_points.shape[0] < 2:
         return None
 
@@ -185,7 +226,7 @@ def _add_cable(prefab: CosseratBase) -> Optional[Sofa.Core.Object]:
         attachedTo=attachment,
         name="ActuationCable",
         cableGeometry=guide_positions,
-        valueType="displacement",
+        valueType=cable_mode,
     )
 
     cable_mo = getattr(cable, "MechanicalObject", None)
@@ -198,21 +239,22 @@ def _add_cable(prefab: CosseratBase) -> Optional[Sofa.Core.Object]:
     return getattr(cable, "CableConstraint", None)
 
 
-def _build_params() -> Parameters:
+def _build_params(robot_cfg: dict) -> Parameters:
+    length = float(robot_cfg.get("length", 160.0))
     geometry = BeamGeometryParameters(
-        beam_length=CATHETER_LENGTH,
-        nb_section=CATHETER_SECTIONS,
-        nb_frames=CATHETER_FRAMES,
+        beam_length=length,
+        nb_section=int(robot_cfg.get("n_sections", 32)),
+        nb_frames=int(robot_cfg.get("n_frames", 64)),
         build_collision_model=1,
     )
     physics = BeamPhysicsParametersNoInertia(
-        beam_mass=CATHETER_MASS,
-        young_modulus=CATHETER_YOUNG_MODULUS,
-        poisson_ratio=CATHETER_POISSON,
-        beam_radius=CATHETER_RADIUS,
-        beam_length=CATHETER_LENGTH,
+        beam_mass=float(robot_cfg.get("mass", 0.04)),
+        young_modulus=float(robot_cfg.get("young_modulus", 8.0e5)),
+        poisson_ratio=float(robot_cfg.get("poisson_ratio", 0.38)),
+        beam_radius=float(robot_cfg.get("radius", 1.45)),
+        beam_length=length,
     )
     params = Parameters(beam_geo_params=geometry, beam_physics_params=physics)
-    params.simu_params.rayleigh_stiffness = CATHETER_RAYLEIGH
+    params.simu_params.rayleigh_stiffness = float(robot_cfg.get("rayleigh", 0.05))
     params.simu_params.rayleigh_mass = 1e-3
     return params

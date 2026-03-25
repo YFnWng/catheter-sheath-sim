@@ -1,0 +1,31 @@
+robot:
+  # Geometry
+  length: 160.0        # mm (total arc length)
+  n_sections: 32
+  n_frames: 64
+  radius: 1.45         # mm (beam cross-section radius)
+  # Physics
+  mass: 0.04           # kg
+  young_modulus: 8.0e5 # Pa
+  poisson_ratio: 0.38
+  rayleigh: 0.05       # Rayleigh stiffness damping coefficient
+  # Base pose
+  # z = -length so the tip starts near the scene origin
+  base_position: [0.0, 0.0, -160.0]          # mm
+  base_orientation_euler_xyz_deg: [0.0, 0.0, 0.0]
+  # Rotates the Cosserat prefab so its local-X rod axis aligns with scene local-Z
+  prefab_rotation_euler_xyz_deg: [0.0, -90.0, 0.0]
+
+actuation:
+  cable_offset: 1.4        # mm lateral offset from centreline
+  cable_point_count: 16
+  pull_increment: 3.0      # mm/s
+  pull_min: 0.0            # mm
+  pull_max: 30.0           # mm
+
+controller:
+  insertion_direction: [0.0, 0.0, 1.0]  # unit vector in local frame
+  insertion_speed: 30.0    # mm/s
+  max_travel: 160.0        # mm
+  rotation_speed: 30.0     # deg/s
+  max_rotation: 180.0      # degrees
