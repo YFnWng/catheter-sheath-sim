@@ -1,31 +1,40 @@
-robot:
-  # Geometry
-  length: 160.0        # mm (total arc length)
+rod:
+  # Geometry — SI (metres).  SOFA's BeamHookeLawForceField treats all lengths
+  # as metres when E is in Pa, so passing SI values keeps physics consistent.
+  length: 160.0e-3       # m (total arc length)
   n_sections: 32
-  n_frames: 64
-  radius: 1.45         # mm (beam cross-section radius)
+  n_frames: 33           # = n_sections + 1 so SOFA frames align exactly with estimator nodes
+  beam_radius: 1.45e-3   # m (beam cross-section radius)
+  kirchhoff: true
   # Physics
-  mass: 0.04           # kg
-  young_modulus: 8.0e5 # Pa
+  mass: 0.04             # kg
+  young_modulus: 8.0e5   # Pa
   poisson_ratio: 0.38
-  rayleigh: 0.05       # Rayleigh stiffness damping coefficient
-  # Base pose
-  # z = -length so the tip starts near the scene origin
-  base_position: [0.0, 0.0, -160.0]          # mm
+  rayleigh: 0.05         # Rayleigh stiffness damping coefficient
+  # Base pose — z = -length so the tip starts near the scene origin
+  base_position: [0.0, 0.0, -160.0e-3]   # m
   base_orientation_euler_xyz_deg: [0.0, 0.0, 0.0]
   # Rotates the Cosserat prefab so its local-X rod axis aligns with scene local-Z
   prefab_rotation_euler_xyz_deg: [0.0, -90.0, 0.0]
 
 actuation:
-  cable_offset: 1.4        # mm lateral offset from centreline
-  cable_point_count: 16
-  pull_increment: 3.0      # mm/s
-  pull_min: 0.0            # mm
-  pull_max: 30.0           # mm
-
-controller:
+  cable_mode: displacement   # displacement | force
+  cable_locations:           # [x, y] coordinates (m) of each cable in the cross-section
+    - [0.0, 1.4e-3]
+  cable_point_count: 33      # number of guide points per cable
+  # Keyboard controller
   insertion_direction: [0.0, 0.0, 1.0]  # unit vector in local frame
-  insertion_speed: 30.0    # mm/s
-  max_travel: 160.0        # mm
-  rotation_speed: 30.0     # deg/s
-  max_rotation: 180.0      # degrees
+  insertion_speed: 30.0e-3   # m/s  (was 30 mm/s)
+  max_travel: 160.0e-3       # m    (was 160 mm)
+  rotation_speed: 30.0       # deg/s
+  max_rotation: 180.0        # degrees
+
+  displacement:
+    pull_min: 0.0            # m
+    pull_max: 30.0e-3        # m    (was 30 mm)
+    pull_increment: 3.0e-3   # m/s  (was 3 mm/s)
+
+  force:
+    pull_min: 0.0            # N
+    pull_max: 0.01           # N    (was 5 N with mm units)
+    pull_increment: 0.001    # N/s

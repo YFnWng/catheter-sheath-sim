@@ -6,7 +6,7 @@ import numpy as np
 def compute_cable_points(
     frame_states: Sequence[Sequence[float]],
     target_count: int,
-    cable_offset: float = 0.0,
+    cable_location: Sequence[float] = (0.0, 0.0),
 ) -> np.ndarray:
     """Sample *target_count* points along a Cosserat frame sequence.
 
@@ -17,9 +17,9 @@ def compute_cable_points(
         (x, y, z position) are used.
     target_count:
         Number of evenly-spaced arc-length samples to return.
-    cable_offset:
-        Lateral offset (mm) added to the y-coordinate of every sample.
-        Useful for placing cable guide points slightly off-centre.
+    cable_location:
+        2D offset ``[x, y]`` (mm) of the cable in the rod cross-section,
+        added to the respective coordinates of every sample.
 
     Returns
     -------
@@ -36,7 +36,8 @@ def compute_cable_points(
         positions = np.zeros((len(frames), 3))
         positions[:, : frames.shape[1]] = frames
 
-    positions[:, 1] += cable_offset
+    positions[:, 0] += float(cable_location[0])
+    positions[:, 1] += float(cable_location[1])
 
     if target_count >= len(positions):
         return positions.copy()

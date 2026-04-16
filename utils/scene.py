@@ -1,4 +1,4 @@
-from typing import Iterable, List
+from typing import Dict, Iterable, List, Sequence
 
 import Sofa
 import Sofa.Core
@@ -6,7 +6,7 @@ import Sofa.Core
 from cosserat.usefulFunctions import pluginList as _COSSERAT_PLUGIN_LIST  # type: ignore
 
 
-BACKGROUND_COLOR = [0.0, 0.0, 0.0, 1.0]
+BACKGROUND_COLOR = [1.0, 1.0, 1.0, 1.0]
 DISPLAY_FLAGS = (
     "showVisualModels showBehaviorModels hideCollisionModels hideBoundingCollisionModels "
     "showForceFields hideInteractionForceFields hideWireframe showMechanicalMappings"
@@ -59,7 +59,9 @@ def add_scene_utilities(root: Sofa.Core.Node) -> None:
     root.addObject("OglSceneFrame", style="Arrows", alignment="TopRight")
     root.addObject("DefaultVisualManagerLoop")
     root.addObject("FreeMotionAnimationLoop")
-    root.addObject("NNCGConstraintSolver", tolerance=1e-9, maxIterations=500)
+    root.addObject("BlockGaussSeidelConstraintSolver", name="ConstraintSolver",
+                   tolerance=1e-9, maxIterations=500,
+                   computeConstraintForces=True)
     root.addObject("CollisionPipeline")
     root.addObject("BruteForceBroadPhase")
     root.addObject("BVHNarrowPhase")
@@ -72,10 +74,43 @@ def add_scene_utilities(root: Sofa.Core.Node) -> None:
     root.addObject(
         "LocalMinDistance",
         name="Proximity",
-        alarmDistance=4.0,
-        contactDistance=1.5,
+        alarmDistance=4.0e-3,    # m (was 4 mm)
+        contactDistance=1.5e-3,  # m (was 1.5 mm)
         angleCone=0.05,
     )
+
+
+def add_constant_forces(
+    cosserat_frame_node,
+    forces: Dict[int, Sequence[float]],
+) -> List:
+    """Apply ``ConstantForceField`` at given frame indices on a Rigid3d frame MO.
+
+    Parameters
+    ----------
+    cosserat_frame_node:
+        The SOFA node containing the ``FramesMO`` Rigid3d MechanicalObject
+        (typically ``robot._prefab.cosseratFrame``).
+    forces:
+        ``{frame_index: [fx, fy, fz]}`` in world frame (N).  Torque
+        components are set to zero.
+
+    Returns
+    -------
+    list
+        The created ``ConstantForceField`` SOFA objects.
+    """
+    ffs = []
+    for idx, f in forces.items():
+        ff = cosserat_frame_node.addObject(
+            "ConstantForceField",
+            name=f"ExtForce_{idx}",
+            template="Rigid3d",
+            indices=[idx],
+            forces=[[float(f[0]), float(f[1]), float(f[2]), 0.0, 0.0, 0.0]],
+        )
+        ffs.append(ff)
+    return ffs
 
 
 def _unique(values: Iterable[str]) -> List[str]:

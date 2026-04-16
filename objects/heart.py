@@ -10,7 +10,7 @@ HEART_MESH = os.path.join(
     _SIMULATION_DIR, "assets", "full_heart_clean_reduced_transseptal.stl"
 )
 
-HEART_POSITION = [60.0, -75.0, -20.0]
+HEART_POSITION = [60.0e-3, -75.0e-3, -20.0e-3]  # m
 HEART_ORIENTATION = (
     R.from_euler("xyz", [-55.0, -20.0, 0.0], degrees=True).as_quat().tolist()
 )
@@ -31,7 +31,7 @@ class HeartModel:
             position=[[*HEART_POSITION, *HEART_ORIENTATION]],
             showObject=False,
         )
-        self._node.addObject("UniformMass", totalMass=1.0)
+        self._node.addObject("UniformMass", totalMass=1.0, showAxisSizeFactor=0)
         self._node.addObject("FixedProjectiveConstraint", indices=[0])
 
         collision = self._node.addChild("Collision")
@@ -39,18 +39,18 @@ class HeartModel:
             "MeshSTLLoader",
             name="loader",
             filename=HEART_MESH,
-            scale=1.0,
+            scale=1.0e-3,  # STL mesh is in mm; convert to m
             triangulate=True,
         )
         collision.addObject("MeshTopology", src="@loader")
-        collision.addObject("MechanicalObject")
+        collision.addObject("MechanicalObject", showObject=False)
         collision.addObject("TriangleCollisionModel", moving=False, simulated=False)
         collision.addObject("LineCollisionModel", moving=False, simulated=False)
         collision.addObject("PointCollisionModel", moving=False, simulated=False)
         collision.addObject("RigidMapping")
 
         visual = self._node.addChild("Visual")
-        visual.addObject("MeshSTLLoader", name="loader", filename=HEART_MESH)
+        visual.addObject("MeshSTLLoader", name="loader", filename=HEART_MESH, scale=1.0e-3)
         visual.addObject(
             "OglModel",
             src="@loader",

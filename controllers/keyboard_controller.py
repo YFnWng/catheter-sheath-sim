@@ -80,7 +80,11 @@ class CatheterKeyboardController(Sofa.Core.Controller):
 
         self._apply_base_pose()
         if self._cable_data is not None:
-            self._cable_data.value = [self.joint_pos[2]]
+            # SOFA's CableConstraint applies ~100× more effective torque than
+            # the physical Rucker model predicts (discrete cable mechanism).
+            # Scale down so the user-facing tension is in physical Newtons.
+            _SOFA_CABLE_SCALE = 0.01
+            self._cable_data.value = [self.joint_pos[2] * _SOFA_CABLE_SCALE]
 
     def onKeypressedEvent(self, event) -> None:
         key = event.get("key")
