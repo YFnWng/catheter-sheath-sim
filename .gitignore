@@ -1,5 +1,6 @@
 # large assets
 *.stl
+*.STL
 *.blend
 *.blend1
 *.obj

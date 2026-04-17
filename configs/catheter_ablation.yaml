@@ -8,9 +8,17 @@ rod:
   kirchhoff: true
   # Physics
   mass: 0.04             # kg
-  young_modulus: 8.0e5   # Pa
-  poisson_ratio: 0.38
-  rayleigh: 0.05         # Rayleigh stiffness damping coefficient
+  # young_modulus: 2.0e9   # Pa
+  # poisson_ratio: 0.38
+  rayleigh: 0.5         # Rayleigh stiffness damping coefficient
+  # Variable stiffness — omit this block for uniform E/nu along the rod.
+  # node_indices: section boundaries where properties change (ascending).
+  # young_modulus / poisson_ratio: one value per segment, or length 1 for uniform.
+  # Example: stiffer proximal half, softer distal half:
+  stiffness_sections:
+    node_indices: [0, 25]
+    young_modulus: [2.0e9, 1.0e8]
+    poisson_ratio: [0.38]
   # Base pose — z = -length so the tip starts near the scene origin
   base_position: [0.0, 0.0, -160.0e-3]   # m
   base_orientation_euler_xyz_deg: [0.0, 0.0, 0.0]
@@ -18,7 +26,7 @@ rod:
   prefab_rotation_euler_xyz_deg: [0.0, -90.0, 0.0]
 
 actuation:
-  cable_mode: displacement   # displacement | force
+  cable_mode: force   # displacement | force
   cable_locations:           # [x, y] coordinates (m) of each cable in the cross-section
     - [0.0, 1.4e-3]
   cable_point_count: 33      # number of guide points per cable
@@ -36,5 +44,5 @@ actuation:
 
   force:
     pull_min: 0.0            # N
-    pull_max: 0.01           # N    (was 5 N with mm units)
-    pull_increment: 0.001    # N/s
+    pull_max: 50.0           # N    (was 5 N with mm units)
+    pull_increment: 2.0    # N/s

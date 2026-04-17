@@ -148,6 +148,62 @@ class CatheterRobot:
 # Internal construction helpers
 # ---------------------------------------------------------------------------
 
+def _apply_variable_stiffness(prefab: CosseratBase, rod_cfg: dict) -> None:
+    """Set per-section Young's modulus and Poisson's ratio if configured.
+
+    The YAML config supports a ``stiffness_sections`` block::
+
+        rod:
+          stiffness_sections:
+            node_indices:   [0, 16]        # section boundaries (ascending)
+            young_modulus:  [2.0e9, 1.0e9] # E for each segment
+            poisson_ratio:  [0.38]         # single value → uniform
+
+    ``node_indices`` lists the section indices where properties change.
+    Each segment spans from ``node_indices[i]`` to ``node_indices[i+1]-1``
+    (the last segment runs to the end of the rod).
+
+    A list of length 1 means that property is uniform across all sections.
+    If ``stiffness_sections`` is absent, nothing is changed (uniform E/nu
+    from the top-level ``young_modulus`` / ``poisson_ratio``).
+    """
+    ss = rod_cfg.get("stiffness_sections")
+    if ss is None:
+        return
+
+    n_sections = int(rod_cfg.get("n_sections", 32))
+    node_indices = ss.get("node_indices", [0])
+    E_list = ss.get("young_modulus", [float(rod_cfg.get("young_modulus", 2.0e9))])
+    nu_list = ss.get("poisson_ratio", [float(rod_cfg.get("poisson_ratio", 0.38))])
+
+    # Expand single-element lists to uniform
+    if len(E_list) == 1:
+        E_list = E_list * len(node_indices)
+    if len(nu_list) == 1:
+        nu_list = nu_list * len(node_indices)
+
+    if len(E_list) != len(node_indices) or len(nu_list) != len(node_indices):
+        raise ValueError(
+            f"stiffness_sections: young_modulus ({len(E_list)}) and "
+            f"poisson_ratio ({len(nu_list)}) must match "
+            f"node_indices ({len(node_indices)}) or have length 1."
+        )
+
+    # Build per-section arrays
+    E_per_section = np.zeros(n_sections)
+    nu_per_section = np.zeros(n_sections)
+    for i, start_idx in enumerate(node_indices):
+        end_idx = node_indices[i + 1] if i + 1 < len(node_indices) else n_sections
+        E_per_section[start_idx:end_idx] = E_list[i]
+        nu_per_section[start_idx:end_idx] = nu_list[i]
+
+    # Access the BeamHookeLawForceField created by CosseratBase
+    beam_ff = prefab.cosseratCoordinate.BeamHookeLawForceField  # type: ignore[attr-defined]
+    beam_ff.findData("variantSections").value = True
+    beam_ff.findData("youngModulusList").value = E_per_section.tolist()
+    beam_ff.findData("poissonRatioList").value = nu_per_section.tolist()
+
+
 def _build(
     root: Sofa.Core.Node,
     rod_cfg: dict,
@@ -191,6 +247,8 @@ def _build(
         translation=base_pos,
         rotation=prefab_base_rotation,
     )
+
+    _apply_variable_stiffness(prefab, rod_cfg)
 
     prefab.rigidBaseNode.addObject(  # type: ignore[attr-defined]
         "RestShapeSpringsForceField",
