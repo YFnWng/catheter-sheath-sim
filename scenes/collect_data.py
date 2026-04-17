@@ -51,7 +51,7 @@ from robots.catheter import CatheterRobot
 from data_collection.generators import SweepGenerator, SinusoidalGenerator
 from data_collection.collector import DataCollectorController
 
-from state_estimation.sofa.bridge.reader import SofaReader
+from utils.sofa_reader import SofaReader
 
 _CONFIG_PATH = os.path.join(_SIM_DIR, "configs", "catheter_ablation.yaml")
 

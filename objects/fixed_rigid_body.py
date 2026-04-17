@@ -172,8 +172,8 @@ class PipelineModel(FixedRigidBody):
             root,
             mesh_path=PIPELINES_MESH,
             name="Pipelines",
-            position=[0.0, 0.0, 0.0],
+            position=[0.0, 0.0, -20.0e-3],
             orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
-            scale=1.0e0,
+            scale=5.0e-1,
             color=[0.7, 0.7, 0.7, 1.0],
         )

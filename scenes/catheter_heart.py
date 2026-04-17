@@ -2,19 +2,6 @@ import os
 import sys
 import yaml
 
-# Make simulation root importable regardless of how runSofa sets sys.path
-_SIM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _SIM_DIR not in sys.path:
-    sys.path.insert(0, _SIM_DIR)
-
-import Sofa
-import Sofa.Core
-
-from utils.scene import add_required_plugins, add_scene_utilities
-from objects.fixed_rigid_body import HeartModel, PipelineModel
-from robots.catheter import CatheterRobot
-from controllers.keyboard_controller import CatheterKeyboardController
-
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SIM_DIR = os.path.normpath(os.path.join(_THIS_DIR, ".."))
 _WORKSPACE = os.path.normpath(os.path.join(_SIM_DIR, ".."))
@@ -24,7 +11,19 @@ if _SIM_DIR not in sys.path:
 if _WORKSPACE not in sys.path:
     sys.path.insert(0, _WORKSPACE)
 
+import Sofa
+import Sofa.Core
+
+from utils.scene import add_required_plugins, add_scene_utilities
+from objects.fixed_rigid_body import PipelineModel
+from robots.catheter import CatheterRobot
+from controllers.keyboard_controller import CatheterKeyboardController
+from controllers.plot_controller import PlotController
+from utils.plotter import DiagnosticPlotter
+from utils.sofa_reader import SofaReader
+
 _CONFIG_PATH = os.path.join(_SIM_DIR, "configs", "catheter_ablation.yaml")
+
 
 def createScene(root: Sofa.Core.Node) -> Sofa.Core.Node:
     with open(_CONFIG_PATH) as f:
@@ -37,10 +36,13 @@ def createScene(root: Sofa.Core.Node) -> Sofa.Core.Node:
     add_scene_utilities(root)
 
     cable_mode = cfg.get("actuation", {}).get("cable_mode", "force")
+    n_cables = len(cfg.get("actuation", {}).get("cable_locations", [[0, 0]]))
+    rod_cfg = cfg.get("rod", {})
+
     env = PipelineModel(root)
     robot = CatheterRobot(root, config_path=_CONFIG_PATH, cable_mode=cable_mode)
 
-    root.addObject(
+    contact_listener = root.addObject(
         "ContactListener",
         name="contactStats",
         collisionModel1=env.triangle_collision_model_path,
@@ -59,6 +61,44 @@ def createScene(root: Sofa.Core.Node) -> Sofa.Core.Node:
             base_orientation=robot.base_orientation,
             prefab_rotation_offset=robot.prefab_rotation_offset,
             cable_constraint=robot.cable_constraint,
+        )
+    )
+
+    # -- SofaReader + Diagnostic plotter --
+    constraint_solver = root.getObject("ConstraintSolver")
+    n_nodes = int(rod_cfg.get("n_frames", 33))
+    n_sections = int(rod_cfg.get("n_sections", 32))
+
+    reader = SofaReader(
+        prefab=robot._prefab,
+        base_mo=robot.base_mo,
+        cable_constraints=robot.cable_constraints,
+        prefab_rotation_offset=robot.prefab_rotation_offset,
+        cable_mode=cable_mode,
+        constraint_solver=constraint_solver,
+        contact_listener=contact_listener,
+    )
+
+    plotter = DiagnosticPlotter(
+        n_nodes=n_nodes,
+        n_sections=n_sections,
+        rod_length=float(rod_cfg.get("length", 0.16)),
+        panels=("base_translation", "base_rotation",
+                "tendon_force", "contact_force"),
+        window_seconds=10.0,
+        dt=float(root.dt.value),
+        n_cables=n_cables,
+        title="Simulation — Diagnostics",
+        size=(1300, 600),
+    )
+
+    root.addObject(
+        PlotController(
+            name="PlotController",
+            plotter=plotter,
+            reader=reader,
+            n_nodes=n_nodes,
+            base_home_position=robot.base_position,
         )
     )
 

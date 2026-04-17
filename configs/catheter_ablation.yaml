@@ -17,7 +17,7 @@ rod:
   # Example: stiffer proximal half, softer distal half:
   stiffness_sections:
     node_indices: [0, 25]
-    young_modulus: [2.0e9, 1.0e8]
+    young_modulus: [2.0e9, 2.0e8]
     poisson_ratio: [0.38]
   # Base pose — z = -length so the tip starts near the scene origin
   base_position: [0.0, 0.0, -160.0e-3]   # m
@@ -45,4 +45,4 @@ actuation:
   force:
     pull_min: 0.0            # N
     pull_max: 50.0           # N    (was 5 N with mm units)
-    pull_increment: 2.0    # N/s
+    pull_increment: 3.0    # N/s
