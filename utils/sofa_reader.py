@@ -139,13 +139,16 @@ class SofaReader:
         if len(lam) == 0:
             return np.zeros((n_nodes, 3))
 
-        # lam is (n_frames, 6) or (n_frames, 7) for Rigid3d
-        # Extract translational force [fx, fy, fz] (first 3 components of wrench)
-        n = min(n_nodes, len(lam))
+        # lam has n_frames+1 entries: index 0 is the rigid base DOF,
+        # indices 1..n_frames correspond to frame DOFs 0..n_frames-1.
+        # Extract translational force [fx, fy, fz] with the +1 offset.
         result = np.zeros((n_nodes, 3))
 
-        for k in range(n):
-            f_world = np.array([lam[k][0], lam[k][1], lam[k][2]], dtype=float)
+        for k in range(n_nodes):
+            k_lam = k + 1
+            if k_lam >= len(lam):
+                break
+            f_world = np.array([lam[k_lam][0], lam[k_lam][1], lam[k_lam][2]], dtype=float)
             if np.linalg.norm(f_world) < 1e-15:
                 continue
             # Rotate to body frame

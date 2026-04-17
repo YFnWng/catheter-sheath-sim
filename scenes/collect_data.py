@@ -52,6 +52,8 @@ from data_collection.generators import SweepGenerator, SinusoidalGenerator
 from data_collection.collector import DataCollectorController
 
 from utils.sofa_reader import SofaReader
+from utils.plotter import DiagnosticPlotter
+from controllers.plot_controller import PlotController
 
 _CONFIG_PATH = os.path.join(_SIM_DIR, "configs", "catheter_ablation.yaml")
 
@@ -61,7 +63,7 @@ _GENERATORS = {
 }
 
 
-def createScene(root: Sofa.Core.Node) -> Sofa.Core.Node:
+def createScene(root: Sofa.Core.Node, headless: bool = False) -> Sofa.Core.Node:
     gen_name = os.environ.get("COLLECT_GENERATOR", "sweep")
     output_path = os.environ.get("COLLECT_OUTPUT", "")
     warmup_steps = int(os.environ.get("COLLECT_WARMUP", "50"))
@@ -138,6 +140,34 @@ def createScene(root: Sofa.Core.Node) -> Sofa.Core.Node:
     )
     root.addObject(controller)
 
+    if not headless:
+        rod_cfg = cfg.get("rod", {})
+        n_nodes = int(rod_cfg.get("n_frames", 33))
+        n_sections = int(rod_cfg.get("n_sections", 32))
+        n_cables = len(cfg.get("actuation", {}).get("cable_locations", [[0, 0]]))
+
+        plotter = DiagnosticPlotter(
+            n_nodes=n_nodes,
+            n_sections=n_sections,
+            rod_length=float(rod_cfg.get("length", 0.16)),
+            panels=("base_translation", "base_rotation",
+                    "tendon_force", "contact_force"),
+            window_seconds=10.0,
+            dt=dt,
+            n_cables=n_cables,
+            title="Data Collection — Diagnostics",
+            size=(1300, 600),
+        )
+        root.addObject(
+            PlotController(
+                name="PlotController",
+                plotter=plotter,
+                reader=reader,
+                n_nodes=n_nodes,
+                base_home_position=robot.base_position,
+            )
+        )
+
     return root
 
 
@@ -153,7 +183,7 @@ def run_headless():
 
     with msg_handler:
         root = Sofa.Core.Node("root")
-        createScene(root)
+        createScene(root, headless=True)
         Sofa.Simulation.init(root)
 
         dt = root.dt.value
