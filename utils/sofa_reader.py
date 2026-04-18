@@ -35,23 +35,16 @@ class SofaReader:
         with the scene convention.  Pass ``None`` if no convention difference.
     cable_mode:
         ``"displacement"`` or ``"force"``.
-    constraint_solver:
-        The scene's constraint solver (needs ``computeConstraintForces=True``).
-    contact_listener:
-        A ``ContactListener`` SOFA object (for contact point queries).
     """
 
     def __init__(self, prefab, base_mo,
                  cable_constraints=None,
                  prefab_rotation_offset=None,
                  cable_mode: str = "displacement",
-                 constraint_solver=None,
-                 contact_listener=None) -> None:
+                 **_kwargs) -> None:
         self._prefab = prefab
         self._base_mo = base_mo
         self._cable_mode = cable_mode
-        self._constraint_solver = constraint_solver
-        self._contact_listener = contact_listener
 
         self._frame_mo = prefab.cosseratFrame.FramesMO
 
@@ -123,11 +116,10 @@ class SofaReader:
 
         Reads the ``lambda`` data field on ``FramesMO``, which contains the
         per-DOF constraint reaction force in world frame (Rigid3d wrench:
-        [fx, fy, fz, tx, ty, tz]).  The translational part [fx, fy, fz] is
-        rotated into the rod body frame.
+        [fx, fy, fz, tx, ty, tz]).  Index 0 is the rigid base DOF; indices
+        1..n_frames correspond to frame DOFs 0..n_frames-1.
 
-        This is more reliable than reconstructing forces from the solver's
-        ``constraintForces`` vector, which is only intermittently populated.
+        The translational part [fx, fy, fz] is rotated into the rod body frame.
         """
         n_nodes = n_sections + 1
 
@@ -139,19 +131,14 @@ class SofaReader:
         if len(lam) == 0:
             return np.zeros((n_nodes, 3))
 
-        # lam has n_frames+1 entries: index 0 is the rigid base DOF,
-        # indices 1..n_frames correspond to frame DOFs 0..n_frames-1.
-        # Extract translational force [fx, fy, fz] with the +1 offset.
         result = np.zeros((n_nodes, 3))
-
         for k in range(n_nodes):
-            k_lam = k + 1
+            k_lam = k + 1  # +1 offset: lam[0] = rigid base DOF
             if k_lam >= len(lam):
                 break
             f_world = np.array([lam[k_lam][0], lam[k_lam][1], lam[k_lam][2]], dtype=float)
             if np.linalg.norm(f_world) < 1e-15:
                 continue
-            # Rotate to body frame
             R_k = R.from_quat(frame_poses[k, 3:7])
             result[k] = R_k.inv().apply(f_world)
 

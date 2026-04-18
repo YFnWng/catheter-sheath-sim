@@ -15,7 +15,7 @@ import Sofa
 import Sofa.Core
 
 from utils.scene import add_required_plugins, add_scene_utilities
-from objects.fixed_rigid_body import PipelineModel
+from objects.fixed_rigid_body import PipelineModel, HeartInsideModel
 from robots.catheter import CatheterRobot
 from controllers.keyboard_controller import CatheterKeyboardController
 from controllers.plot_controller import PlotController
@@ -39,7 +39,7 @@ def createScene(root: Sofa.Core.Node) -> Sofa.Core.Node:
     n_cables = len(cfg.get("actuation", {}).get("cable_locations", [[0, 0]]))
     rod_cfg = cfg.get("rod", {})
 
-    env = PipelineModel(root)
+    env = HeartInsideModel(root)
     robot = CatheterRobot(root, config_path=_CONFIG_PATH, cable_mode=cable_mode)
 
     contact_listener = root.addObject(

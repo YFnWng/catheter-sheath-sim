@@ -1,4 +1,12 @@
-"""Fixed rigid body from an STL mesh — collision + visual."""
+"""Fixed rigid body from an STL mesh — collision + visual.
+
+Includes a model registry for YAML-driven scene configuration::
+
+    from simulation.objects.fixed_rigid_body import add_environment
+
+    for obj in add_environment(root, cfg["environment"][scene_idx]):
+        pass  # each obj is a FixedRigidBody with collision
+"""
 from __future__ import annotations
 
 import os
@@ -117,6 +125,11 @@ PIPELINES_MESH = os.path.join(
     _SIMULATION_DIR, "assets", "pipelines_new_coarse.stl",
 )
 
+RING_MESH = os.path.join(
+    _SIMULATION_DIR, "assets", "ring.stl",
+)
+
+
 
 
 class HeartModel(FixedRigidBody):
@@ -157,7 +170,7 @@ class TurbineModel(FixedRigidBody):
             root,
             mesh_path=TURBINE_MESH,
             name="Turbine",
-            position=[0.0, 0.0, 0.0],
+            position=[0.0, -40.0e-3, -20.0e-3],
             orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
             scale=1.0e0,
             color=[0.7, 0.7, 0.7, 1.0],
@@ -177,3 +190,79 @@ class PipelineModel(FixedRigidBody):
             scale=5.0e-1,
             color=[0.7, 0.7, 0.7, 1.0],
         )
+
+
+class RingModel(FixedRigidBody):
+    """Pre-configured ring mesh."""
+
+    def __init__(self, root: Sofa.Core.Node) -> None:
+        super().__init__(
+            root,
+            mesh_path=RING_MESH,
+            name="Ring",
+            position=[0.0, 0.0, 0.0],
+            orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
+            scale=1.0e-2,
+            color=[0.7, 0.7, 0.7, 1.0],
+        )
+
+
+# ── Model registry + factory ──────────────────────────────────────────────
+
+MODEL_REGISTRY = {
+    "HeartModel": HeartModel,
+    "HeartInsideModel": HeartInsideModel,
+    "TurbineModel": TurbineModel,
+    "PipelineModel": PipelineModel,
+    "RingModel": RingModel,
+}
+
+
+def add_environment(root, scene_objects):
+    """Instantiate environment objects from a YAML scene list.
+
+    Parameters
+    ----------
+    root : Sofa.Core.Node
+        Parent SOFA node.
+    scene_objects : list of str or list of dict
+        Each entry is either a model name (str) looked up in
+        ``MODEL_REGISTRY``, or a dict ``{"type": "...", ...}``
+        where extra keys are passed to ``FixedRigidBody.__init__``.
+
+    Returns
+    -------
+    list of FixedRigidBody
+        The instantiated environment objects.
+
+    Example YAML::
+
+        scenes:
+          - [PipelineModel, RingModel]
+          - [HeartModel]
+          - [{type: FixedRigidBody, mesh_path: assets/custom.stl,
+              name: Custom, scale: 0.001}]
+    """
+    objects = []
+    for entry in scene_objects:
+        if isinstance(entry, str):
+            cls = MODEL_REGISTRY.get(entry)
+            if cls is None:
+                raise ValueError(
+                    f"Unknown model: {entry!r}. "
+                    f"Available: {list(MODEL_REGISTRY.keys())}"
+                )
+            objects.append(cls(root))
+        elif isinstance(entry, dict):
+            entry = dict(entry)
+            type_name = entry.pop("type", "FixedRigidBody")
+            if type_name == "FixedRigidBody":
+                objects.append(FixedRigidBody(root, **entry))
+            else:
+                cls = MODEL_REGISTRY.get(type_name)
+                if cls is None:
+                    raise ValueError(f"Unknown model: {type_name!r}")
+                objects.append(cls(root))
+        else:
+            raise ValueError(f"Invalid scene entry: {entry!r}")
+    return objects
