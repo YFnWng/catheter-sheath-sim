@@ -3,7 +3,7 @@ rod:
   # as metres when E is in Pa, so passing SI values keeps physics consistent.
   length: 160.0e-3       # m (total arc length)
   n_sections: 32
-  n_frames: 33           # = n_sections + 1 so SOFA frames align exactly with estimator nodes
+  n_frames: 32           # geometry.py appends tip → 32+1=33 total SOFA frames = n_sections+1
   beam_radius: 1.45e-3   # m (beam cross-section radius)
   kirchhoff: true
   # Physics

@@ -14,11 +14,18 @@ class TrajectoryRecord:
 
     All arrays are lists-of-arrays during collection and converted to
     contiguous numpy arrays by :meth:`finalise` before HDF5 writing.
+
+    Fields
+    ------
+    timestamps : simulation time (s)
+    frame_poses : (n_frames, 7) Rigid3d per frame
+    strain_coords : (n_sections, 3) curvature per section
+    joint_commands : (n_joints,) control input [insertion, rotation, cable, ...]
+    contact_force_body : (n_frames, 3) per-node contact force in body frame
     """
     timestamps: List[float] = field(default_factory=list)
     frame_poses: List[np.ndarray] = field(default_factory=list)
     strain_coords: List[np.ndarray] = field(default_factory=list)
-    cable_tensions: List[Optional[np.ndarray]] = field(default_factory=list)
     joint_commands: List[np.ndarray] = field(default_factory=list)
     contact_force_body: List[np.ndarray] = field(default_factory=list)
 
@@ -27,15 +34,12 @@ class TrajectoryRecord:
         t: float,
         frame_poses: np.ndarray,
         strain_coords: np.ndarray,
-        cable_tensions: Optional[np.ndarray],
         joint_commands: np.ndarray,
         contact_force_body: np.ndarray,
     ) -> None:
         self.timestamps.append(t)
         self.frame_poses.append(frame_poses.copy())
         self.strain_coords.append(strain_coords.copy())
-        ct = cable_tensions.copy() if cable_tensions is not None else np.zeros(1)
-        self.cable_tensions.append(ct)
         self.joint_commands.append(joint_commands.copy())
         self.contact_force_body.append(contact_force_body.copy())
 
@@ -45,7 +49,6 @@ class TrajectoryRecord:
             "timestamps": np.array(self.timestamps, dtype=np.float64),
             "frame_poses": np.stack(self.frame_poses).astype(np.float64),
             "strain_coords": np.stack(self.strain_coords).astype(np.float64),
-            "cable_tensions": np.stack(self.cable_tensions).astype(np.float64),
             "joint_commands": np.stack(self.joint_commands).astype(np.float64),
             "contact_force_body": np.stack(self.contact_force_body).astype(np.float64),
         }

@@ -128,7 +128,6 @@ class DataCollectorController(Sofa.Core.Controller):
             t=t_sim,
             frame_poses=sofa_gt.frame_poses,
             strain_coords=sofa_gt.strain_coords,
-            cable_tensions=sofa_gt.cable_tensions,
             joint_commands=joint_cmd,
             contact_force_body=sofa_gt.contact_force_body,
         )
