@@ -1,0 +1,62 @@
+rod:
+  # Geometry — SI (metres).  SOFA's BeamHookeLawForceField treats all lengths
+  # as metres when E is in Pa, so passing SI values keeps physics consistent.
+  length: 160.0e-3       # m (total arc length)
+  n_sections: 32
+  n_frames: 32           # geometry.py appends tip → 32+1=33 total SOFA frames = n_sections+1
+  beam_radius: 1.45e-3   # m (beam cross-section radius)
+  kirchhoff: true
+  # Physics
+  mass: 0.04             # kg
+  # young_modulus: 2.0e9   # Pa
+  # poisson_ratio: 0.38
+  rayleigh: 0.5         # Rayleigh stiffness damping coefficient
+  # Variable stiffness — omit this block for uniform E/nu along the rod.
+  # node_indices: section boundaries where properties change (ascending).
+  # young_modulus / poisson_ratio: one value per segment, or length 1 for uniform.
+  # Example: stiffer proximal half, softer distal half:
+  stiffness_sections:
+    node_indices: [0, 25]
+    young_modulus: [2.0e9, 2.0e8]
+    poisson_ratio: [0.38]
+  # Base pose — z = -length so the tip starts near the scene origin
+  base_position: [0.0, 0.0, -160.0e-3]   # m
+  base_orientation_euler_xyz_deg: [0.0, 0.0, 0.0]
+  # Rotates the Cosserat prefab so its local-X rod axis aligns with scene local-Z
+  prefab_rotation_euler_xyz_deg: [0.0, -90.0, 0.0]
+
+# Environment scenes for batch data collection.
+# Each entry is a list of objects.  Objects can be:
+#   - a string (model name from MODEL_REGISTRY with default parameters)
+#   - a dict with "type" + parameter overrides (position, scale, etc.)
+# collect_data.py iterates through all scenes, running one trajectory per scene.
+# Parameters are stored in trajectory metadata for replay.
+scenes:
+  - - {type: TurbineModel, position: [0.0, -40.0e-3, -20.0e-3]}
+    - {type: RingModel, position: [0.0, 0.0, 10.0e-3], scale: 1.0e-2}
+  - - {type: PipelineModel, position: [0.0, 0.0, -20.0e-3], scale: 0.5}
+    - {type: RingModel, position: [0.0, 0.0, 10.0e-3], scale: 1.0e-2}
+  - - {type: HeartInsideModel}
+  - - {type: RingModel, position: [0.0, 0.0, 10.0e-3], scale: 1.0e-2}
+
+actuation:
+  cable_mode: force   # displacement | force
+  cable_locations:           # [x, y] coordinates (m) of each cable in the cross-section
+    - [0.0, 1.4e-3]
+  cable_point_count: 33      # number of guide points per cable
+  # Keyboard controller
+  insertion_direction: [0.0, 0.0, 1.0]  # unit vector in local frame
+  insertion_speed: 30.0e-3   # m/s  (was 30 mm/s)
+  max_travel: 80.0e-3       # m    (was 160 mm)
+  rotation_speed: 30.0       # deg/s
+  max_rotation: 180.0        # degrees
+
+  displacement:
+    pull_min: 0.0            # m
+    pull_max: 30.0e-3        # m    (was 30 mm)
+    pull_increment: 3.0e-3   # m/s  (was 3 mm/s)
+
+  force:
+    pull_min: 0.0            # N
+    pull_max: 50.0           # N    (was 5 N with mm units)
+    pull_increment: 3.0    # N/s

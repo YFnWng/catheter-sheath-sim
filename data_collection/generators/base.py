@@ -39,6 +39,24 @@ class InputGenerator(ABC):
         """Return True when the trajectory is complete."""
         ...
 
+    # Joint index 1 is rotation (degrees) — wrappable to [-180, 180].
+    _ROTATION_IDX = 1
+
+    @staticmethod
+    def wrap_rotation(cmd: np.ndarray) -> np.ndarray:
+        """Wrap the rotation joint (index 1) to [-180, 180] degrees."""
+        out = cmd.copy()
+        out[1] = ((out[1] + 180.0) % 360.0) - 180.0
+        return out
+
+    @staticmethod
+    def shortest_rotation_delta(start: np.ndarray, end: np.ndarray) -> np.ndarray:
+        """Compute delta that takes the shortest path for rotation (index 1)."""
+        delta = end - start
+        # Wrap rotation delta to [-180, 180]
+        delta[1] = ((delta[1] + 180.0) % 360.0) - 180.0
+        return delta
+
     @property
     def name(self) -> str:
         return type(self).__name__

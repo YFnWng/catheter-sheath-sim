@@ -132,6 +132,14 @@ class CatheterRobot:
             float(mode_cfg.get("pull_min", 0.0)),
         ]
 
+        # Joint semantics: name and type for each control DOF.
+        # Types: "linear" (m), "angle_deg" (degrees), "force" (N), "displacement" (m)
+        self.joint_names: List[str] = ["insertion", "rotation"]
+        self.joint_types: List[str] = ["linear", "angle_deg"]
+        for i in range(len(self.cable_constraints)):
+            self.joint_names.append(f"cable_{i}")
+            self.joint_types.append(cable_mode)  # "force" or "displacement"
+
     @property
     def cable_constraint(self):
         """First cable constraint — backward-compat alias for single-cable scenes."""

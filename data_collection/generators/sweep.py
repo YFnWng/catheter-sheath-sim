@@ -12,9 +12,8 @@ class SweepGenerator(InputGenerator):
     """Raster sweep through a grid of (insertion, rotation, cable) waypoints.
 
     Generates smooth linear ramps between grid points so SOFA's solver stays
-    stable.  At each waypoint the catheter dwells for ``dwell_time`` seconds
-    to let transients settle before the collector records a quasi-static
-    snapshot.
+    stable.  Rotation ramps take the shortest angular path and the output
+    is wrapped to [-180, 180] degrees.
 
     Parameters
     ----------
@@ -26,7 +25,6 @@ class SweepGenerator(InputGenerator):
         Number of grid points along each axis.
     ramp_speed:
         Fraction of joint range traversed per second during ramp segments.
-        e.g. 0.5 means the full range is swept in 2 seconds.
     dwell_time:
         Seconds to dwell at each waypoint.
     """
@@ -60,30 +58,37 @@ class SweepGenerator(InputGenerator):
         self._total_time = sum(s[0] for s in self._segments) if self._segments else 0.0
 
     def _build_segments(self):
-        """Build list of (duration, start_pos, end_pos) segments."""
+        """Build list of (duration, start_pos, delta) segments.
+
+        Uses shortest-path rotation delta so the ramp doesn't travel
+        the long way around.
+        """
         if not self._waypoints:
             return []
         segments = []
         prev = self._waypoints[0].copy()
-        segments.append((self._dwell, prev, prev.copy()))
+        segments.append((self._dwell, prev.copy(), np.zeros_like(prev)))
         for wp in self._waypoints[1:]:
-            delta = np.abs(wp - prev)
+            delta = self.shortest_rotation_delta(prev, wp)
+            abs_delta = np.abs(delta)
             safe_rate = np.where(self._ramp_rate > 1e-12, self._ramp_rate, 1.0)
-            ramp_time = max(np.max(delta / safe_rate), self.dt)
-            segments.append((ramp_time, prev.copy(), wp.copy()))
-            segments.append((self._dwell, wp.copy(), wp.copy()))
-            prev = wp.copy()
+            ramp_time = max(np.max(abs_delta / safe_rate), self.dt)
+            segments.append((ramp_time, prev.copy(), delta))
+            prev = prev + delta  # unwrapped end position
+            segments.append((self._dwell, prev.copy(), np.zeros_like(prev)))
         return segments
 
     def step(self, t: float) -> np.ndarray:
         elapsed = 0.0
-        for duration, start, end in self._segments:
+        for duration, start, delta in self._segments:
             if t < elapsed + duration:
                 alpha = (t - elapsed) / duration if duration > 0 else 1.0
                 alpha = np.clip(alpha, 0.0, 1.0)
-                return start + alpha * (end - start)
+                return self.wrap_rotation(start + alpha * delta)
             elapsed += duration
-        return self._waypoints[-1] if self._waypoints else self.joint_lower.copy()
+        if self._waypoints:
+            return self.wrap_rotation(self._waypoints[-1])
+        return self.joint_lower.copy()
 
     def is_done(self, t: float) -> bool:
         return t >= self._total_time

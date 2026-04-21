@@ -63,7 +63,7 @@ from utils.sofa_reader import SofaReader
 from utils.plotter import DiagnosticPlotter
 from controllers.plot_controller import PlotController
 
-_CONFIG_PATH = os.path.join(_SIM_DIR, "configs", "catheter_ablation.yaml")
+_CONFIG_PATH = os.path.join(_SIM_DIR, "configs", "catheter_data_collection.yaml")
 
 _GENERATORS = {
     "sweep": SweepGenerator,
@@ -96,7 +96,13 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         scene_idx = int(os.environ.get("COLLECT_SCENE_IDX", "0"))
         scene_objects = scenes[min(scene_idx, len(scenes) - 1)]
 
-    scene_tag = "_".join(scene_objects) if isinstance(scene_objects[0], str) else "custom"
+    def _obj_name(entry):
+        if isinstance(entry, str):
+            return entry
+        if isinstance(entry, dict):
+            return entry.get("type", entry.get("name", "custom"))
+        return "custom"
+    scene_tag = "_".join(_obj_name(e) for e in scene_objects)
     if not output_path:
         data_dir = os.path.join(_SIM_DIR, "data_collection", "data")
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -137,6 +143,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         "dt": dt,
         "gravity": list(root.gravity.value),
         "scene_objects": scene_objects,
+        "robot_type": type(robot).__name__,
     }
 
     controller = DataCollectorController(
@@ -193,7 +200,13 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
 def _run_one_scene(scene_objects, scene_idx, total_scenes):
     """Run one scene headless and return (n_steps, wall_time)."""
     max_steps = int(os.environ.get("COLLECT_MAX_STEPS", "0"))
-    label = ", ".join(scene_objects) if isinstance(scene_objects[0], str) else f"scene_{scene_idx}"
+    def _obj_label(entry):
+        if isinstance(entry, str):
+            return entry
+        if isinstance(entry, dict):
+            return entry.get("type", "custom")
+        return "custom"
+    label = ", ".join(_obj_label(e) for e in scene_objects)
 
     root = Sofa.Core.Node("root")
     createScene(root, headless=True, scene_objects=scene_objects)

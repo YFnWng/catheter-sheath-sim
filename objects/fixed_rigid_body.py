@@ -135,76 +135,76 @@ RING_MESH = os.path.join(
 class HeartModel(FixedRigidBody):
     """Pre-configured full heart mesh."""
 
-    def __init__(self, root: Sofa.Core.Node) -> None:
-        super().__init__(
-            root,
-            mesh_path=HEART_MESH,
-            name="Heart",
-            position=[60.0e-3, -75.0e-3, -20.0e-3],
-            orientation_euler_xyz_deg=[-55.0, -20.0, 0.0],
-            scale=1.0e-3,
-            color=[0.85, 0.1, 0.1, 0.5],
-        )
+    _DEFAULTS = dict(
+        mesh_path=HEART_MESH, name="Heart",
+        position=[60.0e-3, -75.0e-3, -20.0e-3],
+        orientation_euler_xyz_deg=[-55.0, -20.0, 0.0],
+        scale=1.0e-3, color=[0.85, 0.1, 0.1, 0.5],
+    )
+
+    def __init__(self, root: Sofa.Core.Node, **overrides) -> None:
+        kw = {**self._DEFAULTS, **overrides}
+        super().__init__(root, **kw)
 
 
 class HeartInsideModel(FixedRigidBody):
-    """Pre-configured inside surface mesh of the amazon heart model (a different heart)."""
+    """Pre-configured inside surface mesh of the amazon heart model."""
 
-    def __init__(self, root: Sofa.Core.Node) -> None:
-        super().__init__(
-            root,
-            mesh_path=HEART_INSIDE_MESH,
-            name="HeartInside",
-            position=[0.0, 0.0, 0.0],
-            orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
-            scale=1.0e0,
-            color=[0.85, 0.1, 0.1, 0.5],
-        )
+    _DEFAULTS = dict(
+        mesh_path=HEART_INSIDE_MESH, name="HeartInside",
+        position=[0.0, 0.0, 0.0],
+        orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
+        scale=1.0e0, color=[0.85, 0.1, 0.1, 0.5],
+    )
+
+    def __init__(self, root: Sofa.Core.Node, **overrides) -> None:
+        kw = {**self._DEFAULTS, **overrides}
+        super().__init__(root, **kw)
 
 
 class TurbineModel(FixedRigidBody):
     """Pre-configured turbine mesh."""
 
-    def __init__(self, root: Sofa.Core.Node) -> None:
-        super().__init__(
-            root,
-            mesh_path=TURBINE_MESH,
-            name="Turbine",
-            position=[0.0, -40.0e-3, -20.0e-3],
-            orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
-            scale=1.0e0,
-            color=[0.7, 0.7, 0.7, 1.0],
-        )
+    _DEFAULTS = dict(
+        mesh_path=TURBINE_MESH, name="Turbine",
+        position=[0.0, -40.0e-3, -20.0e-3],
+        orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
+        scale=1.0e0, color=[0.7, 0.7, 0.7, 1.0],
+    )
+
+    def __init__(self, root: Sofa.Core.Node, **overrides) -> None:
+        kw = {**self._DEFAULTS, **overrides}
+        super().__init__(root, **kw)
 
 
 class PipelineModel(FixedRigidBody):
     """Pre-configured pipeline mesh."""
 
-    def __init__(self, root: Sofa.Core.Node) -> None:
-        super().__init__(
-            root,
-            mesh_path=PIPELINES_MESH,
-            name="Pipelines",
-            position=[0.0, 0.0, -20.0e-3],
-            orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
-            scale=5.0e-1,
-            color=[0.7, 0.7, 0.7, 1.0],
-        )
+    _DEFAULTS = dict(
+        mesh_path=PIPELINES_MESH, name="Pipelines",
+        position=[0.0, 0.0, -20.0e-3],
+        orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
+        scale=5.0e-1, color=[0.7, 0.7, 0.7, 1.0],
+    )
+
+    def __init__(self, root: Sofa.Core.Node, **overrides) -> None:
+        kw = {**self._DEFAULTS, **overrides}
+        super().__init__(root, **kw)
 
 
 class RingModel(FixedRigidBody):
     """Pre-configured ring mesh."""
 
-    def __init__(self, root: Sofa.Core.Node) -> None:
-        super().__init__(
-            root,
-            mesh_path=RING_MESH,
-            name="Ring",
-            position=[0.0, 0.0, 0.0],
-            orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
-            scale=1.0e-2,
-            color=[0.7, 0.7, 0.7, 1.0],
-        )
+    _DEFAULTS = dict(
+        mesh_path=RING_MESH, name="Ring",
+        position=[0.0, 0.0, 0.0],
+        orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
+        scale=1.0e-2, color=[0.7, 0.7, 0.7, 1.0],
+    )
+
+    def __init__(self, root: Sofa.Core.Node, **overrides) -> None:
+        kw = {**self._DEFAULTS, **overrides}
+        super().__init__(root, **kw)
 
 
 # ── Model registry + factory ──────────────────────────────────────────────
@@ -262,7 +262,8 @@ def add_environment(root, scene_objects):
                 cls = MODEL_REGISTRY.get(type_name)
                 if cls is None:
                     raise ValueError(f"Unknown model: {type_name!r}")
-                objects.append(cls(root))
+                # Pass remaining keys as overrides to the registered model
+                objects.append(cls(root, **entry))
         else:
             raise ValueError(f"Invalid scene entry: {entry!r}")
     return objects

@@ -42,7 +42,7 @@ class SinusoidalGenerator(InputGenerator):
 
     def step(self, t: float) -> np.ndarray:
         phase = 2.0 * np.pi * self._freq * t
-        return self._mid + self._amp * np.sin(phase)
+        return self.wrap_rotation(self._mid + self._amp * np.sin(phase))
 
     def is_done(self, t: float) -> bool:
         return t >= self._duration
