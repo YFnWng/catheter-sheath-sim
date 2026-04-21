@@ -57,6 +57,16 @@ class DataCollectorController(Sofa.Core.Controller):
         self._warmup_steps: int = kwargs.pop("warmup_steps", 50)
         self._metadata: dict = kwargs.pop("metadata", {})
 
+        init_bp = kwargs.pop("initial_base_pose", None)
+        self._initial_base_pose = (
+            np.asarray(init_bp, dtype=float) if init_bp is not None else None
+        )
+        init_sc = kwargs.pop("initial_strain_coords", None)
+        self._initial_strain_coords = (
+            np.asarray(init_sc, dtype=float) if init_sc is not None else None
+        )
+        self._strain_mo = kwargs.pop("strain_mechanical_object", None)
+
         self._base_home_position = np.asarray(
             kwargs.pop("base_position", np.zeros(3)), dtype=float,
         )
@@ -89,8 +99,9 @@ class DataCollectorController(Sofa.Core.Controller):
 
         self._step_count += 1
 
-        # During warmup, hold at initial position
+        # During warmup, hold at initial physical state to let rod settle
         if self._step_count <= self._warmup_steps:
+            self._apply_initial_state()
             return
 
         dt = float(self._base_mo.getContext().dt.value)
@@ -131,6 +142,29 @@ class DataCollectorController(Sofa.Core.Controller):
             joint_commands=joint_cmd,
             contact_force_body=sofa_gt.contact_force_body,
         )
+
+    def _apply_initial_state(self) -> None:
+        """Write saved base_pose and strain_coords directly to SOFA MOs.
+
+        Called each warmup step so the solver holds the rod in the
+        desired configuration while transients settle.  Cable constraint
+        stays at zero (all trajectories start from zero actuations).
+        """
+        if self._initial_base_pose is not None:
+            bp = self._initial_base_pose
+            with self._base_mo.position.writeable() as pos:
+                pos[0][:] = bp
+            if (hasattr(self._base_mo, "rest_position")
+                    and len(self._base_mo.rest_position.value) > 0):
+                with self._base_mo.rest_position.writeable() as rest:
+                    rest[0][:] = bp
+
+        if self._initial_strain_coords is not None and self._strain_mo is not None:
+            sc = self._initial_strain_coords
+            with self._strain_mo.position.writeable() as strain_pos:
+                n = min(len(sc), len(strain_pos))
+                for i in range(n):
+                    strain_pos[i][:] = sc[i]
 
     def _apply_joint_commands(self, joint_cmd: np.ndarray) -> None:
         """Apply [insertion, rotation, cable] to SOFA objects."""

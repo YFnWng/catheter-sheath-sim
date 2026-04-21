@@ -25,15 +25,6 @@ rod:
   # Rotates the Cosserat prefab so its local-X rod axis aligns with scene local-Z
   prefab_rotation_euler_xyz_deg: [0.0, -90.0, 0.0]
 
-# Environment scenes for batch data collection.
-# Each entry is a list of model names (from MODEL_REGISTRY in fixed_rigid_body.py).
-# collect_data.py iterates through all scenes, running one trajectory per scene.
-scenes:
-  - [TurbineModel, RingModel]
-  - [PipelineModel, RingModel]
-  - [HeartInsideModel]
-  - [RingModel]
-
 actuation:
   cable_mode: force   # displacement | force
   cable_locations:           # [x, y] coordinates (m) of each cable in the cross-section

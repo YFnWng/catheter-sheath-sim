@@ -23,7 +23,7 @@ Tested with:
 simulation/
   configs/
     catheter_ablation.yaml          # Rod geometry, physics, actuation limits
-    catheter_data_collection.yaml   # Scenes + generator config for batch collection
+    generated_scenes.yaml           # Environment scenes for data collection (auto-generated)
   robots/
     catheter.py                     # CatheterRobot: Cosserat rod + cables + collision
   objects/
@@ -40,6 +40,8 @@ simulation/
       base.py                       # InputGenerator ABC
       sweep.py                      # Grid sweep through joint space
       sinusoidal.py                 # Incommensurate-frequency sinusoidal excitation
+      generate_environments.py      # Random obstacle scene generator
+      remove_bad_scenes.py          # Remove scenes without initial_config
     collector.py                    # DataCollectorController (records to HDF5)
     schema.py                       # TrajectoryRecord + HDF5 read/write
     data/                           # Collected .h5 files (gitignored)
@@ -66,19 +68,36 @@ Keyboard control: `u/j` insertion, `k/h` rotation, `i/y` cable tension. Four-pan
 
 ### Data collection (`collect_data.py`)
 
-Collects trajectory data from multiple environment configurations defined in `catheter_data_collection.yaml`.
+Collects trajectory data from environment scenes defined in `generated_scenes.yaml`. Robot config is read from `catheter_ablation.yaml`.
+
+**1. Generate environments:**
+```bash
+python simulation/data_collection/generators/generate_environments.py --n 20
+```
+
+**2. Manual init** — set initial rod configuration per scene:
+```bash
+python simulation/scenes/collect_data.py --init
+```
+Controls: `u/j` insertion, `k/h` rotation, `i/y` cable, `0` zero rotation & cable, `p` save config.
+
+**3. Remove scenes where init was skipped:**
+```bash
+python simulation/data_collection/generators/remove_bad_scenes.py \
+    simulation/configs/generated_scenes.yaml
+```
+
+**4. Headless collection** (all scenes, no GUI):
+```bash
+python simulation/scenes/collect_data.py
+```
 
 **GUI mode** (one scene, with plotter):
 ```bash
 runSofa -g qt simulation/scenes/collect_data.py
 ```
 
-**Headless mode** (all scenes, no GUI — faster):
-```bash
-python simulation/scenes/collect_data.py
-```
-
-Environment variables: `COLLECT_GENERATOR` (`sweep` | `sinusoidal`), `COLLECT_WARMUP`, `COLLECT_MAX_STEPS`, `COLLECT_SCENE_IDX`.
+Environment variables: `COLLECT_GENERATOR` (`sweep` | `sinusoidal`), `COLLECT_WARMUP`, `COLLECT_MAX_STEPS`, `COLLECT_SCENE_IDX`, `COLLECT_SCENES`.
 
 ### Replay (`replay_data.py`)
 
@@ -93,16 +112,22 @@ REPLAY_FILE=sweep_PipelineModel_RingModel_20260417.h5 \
 
 ## Environment configuration
 
-Scenes are defined as lists of environment objects in YAML. Each object is a registered model name or a dict with parameter overrides:
+Scenes are defined in `configs/generated_scenes.yaml` (or any YAML passed via `--scenes` / `COLLECT_SCENES`). Each scene is a dict with `objects` and optional `initial_config`:
 
 ```yaml
 scenes:
-  - - {type: PipelineModel, position: [0, 0, -0.02], scale: 0.5}
-    - {type: RingModel, scale: 0.01}
-  - - {type: HeartInsideModel}
+  - objects:
+      - {type: RingModel, position: [0, 0, 0.01], scale: 0.01}
+    initial_config:
+      base_pose: [0, 0, -0.13, 0, 0, 0, 1]
+      strain_coords: [[0, 0, 0], ...]
+  - objects:
+      - {type: SlabModel, position: [0, 0, 0], scale: 0.01}
 ```
 
-Available models: `HeartModel`, `HeartInsideModel`, `TurbineModel`, `PipelineModel`, `RingModel`. Custom meshes can be added via `FixedRigidBody` with `mesh_path`.
+`initial_config` stores the rod's physical state (base pose + per-section strain) at zero actuation. Set via `--init` mode. Scenes without `initial_config` start from the default straight configuration.
+
+Available models: `HeartModel`, `HeartInsideModel`, `TurbineModel`, `PipelineModel`, `RingModel`, `SlabModel`. Custom meshes can be added via `FixedRigidBody` with `mesh_path`.
 
 ## Robot
 

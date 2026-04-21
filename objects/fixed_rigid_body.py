@@ -129,6 +129,10 @@ RING_MESH = os.path.join(
     _SIMULATION_DIR, "assets", "ring.stl",
 )
 
+SLAB_MESH = os.path.join(
+    _SIMULATION_DIR, "assets", "slab.stl",
+)
+
 
 
 
@@ -207,6 +211,21 @@ class RingModel(FixedRigidBody):
         super().__init__(root, **kw)
 
 
+class SlabModel(FixedRigidBody):
+    """Pre-configured slab mesh."""
+
+    _DEFAULTS = dict(
+        mesh_path=SLAB_MESH, name="Slab",
+        position=[0.0, 0.0, 0.0],
+        orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
+        scale=1.0e-2, color=[0.7, 0.7, 0.7, 1.0],
+    )
+
+    def __init__(self, root: Sofa.Core.Node, **overrides) -> None:
+        kw = {**self._DEFAULTS, **overrides}
+        super().__init__(root, **kw)
+
+
 # ── Model registry + factory ──────────────────────────────────────────────
 
 MODEL_REGISTRY = {
@@ -215,6 +234,7 @@ MODEL_REGISTRY = {
     "TurbineModel": TurbineModel,
     "PipelineModel": PipelineModel,
     "RingModel": RingModel,
+    "SlabModel": SlabModel,
 }
 
 
