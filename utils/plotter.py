@@ -89,7 +89,7 @@ def _build_internal_force(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, l
 
 def _build_contact_force(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
     import pyqtgraph as pg
-    p = _make_panel(win, "Contact force", "N")
+    p = _make_panel(win, "External force", "N")
     ef = [p.plot(s_n, zeros_n, pen=pg.mkPen(_C[i], width=2), name=f"est F{l}")
           for i, l in enumerate("xyz")]
     gf = [p.plot(s_n, zeros_n, pen=None,
@@ -139,6 +139,16 @@ def _build_total_contact_force(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[s
     return dict(tcf=tcf, tcf_norm=[tcf_norm])
 
 
+def _build_tip_load(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
+    import pyqtgraph as pg
+    p = _make_panel(win, "Tip load", "N", xlabel="t (s)")
+    p.addLine(y=0, pen=pg.mkPen("k", width=0.5))
+    tl = [p.plot([], [], pen=pg.mkPen(_C[i], width=2), name=l)
+          for i, l in enumerate("XYZ")]
+    tl_norm = p.plot([], [], pen=pg.mkPen((0, 0, 0), width=2, style=2), name="|F|")
+    return dict(tl=tl, tl_norm=[tl_norm])
+
+
 PANEL_BUILDERS = {
     # Spatial panels
     "position": _build_position,
@@ -150,11 +160,13 @@ PANEL_BUILDERS = {
     "base_rotation": _build_base_rotation,
     "tendon_force": _build_tendon_force,
     "total_contact_force": _build_total_contact_force,
+    "tip_load": _build_tip_load,
 }
 
 # Panels whose curves use rolling time buffers instead of fixed arc-length
 _TIME_SERIES_PANELS = {"base_translation", "base_rotation",
-                       "tendon_force", "total_contact_force"}
+                       "tendon_force", "total_contact_force",
+                       "tip_load"}
 
 # Data key -> curve key mapping for time-series panels
 _TS_CURVE_KEYS = {
@@ -163,6 +175,7 @@ _TS_CURVE_KEYS = {
     "cable_tensions": "tf",
     "total_contact": "tcf",
     "total_contact_norm": "tcf_norm",
+    "tip_load": "tl",
 }
 
 _PANELS_PER_ROW = 2
@@ -264,10 +277,15 @@ def _apply(curves: Dict[str, list], data: dict, s_n, s_s, ts_bufs):
     if "tcf_norm" in curves and "total_contact" in data:
         norm = float(np.linalg.norm(data["total_contact"]))
         ts_bufs.setdefault("tcf_norm", deque(maxlen=ts_bufs["t"].maxlen))
-        # Only append if not already appended above
-        if len(ts_bufs["tcf_norm"]) < len(ts_bufs["t"]):
-            ts_bufs["tcf_norm"].append(norm)
+        ts_bufs["tcf_norm"].append(norm)
         curves["tcf_norm"][0].setData(t_arr, np.array(ts_bufs["tcf_norm"]))
+
+    # tip_load_norm: compute |F| from tip_load if present
+    if "tl_norm" in curves and "tip_load" in data:
+        norm = float(np.linalg.norm(data["tip_load"]))
+        ts_bufs.setdefault("tl_norm", deque(maxlen=ts_bufs["t"].maxlen))
+        ts_bufs["tl_norm"].append(norm)
+        curves["tl_norm"][0].setData(t_arr, np.array(ts_bufs["tl_norm"]))
 
 
 # ---------------------------------------------------------------------------

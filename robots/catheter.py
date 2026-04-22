@@ -219,11 +219,12 @@ def _build(
     cable_mode: str = "displacement",
 ) -> Tuple[CosseratBase, Sofa.Core.Node, List[Optional[Sofa.Core.Object]]]:
     solver_node = root.addChild("CatheterSimulation")
-    rayleigh = float(rod_cfg.get("rayleigh", 0.05))
+    rayleigh_stiffness = float(rod_cfg.get("rayleigh_stiffness", rod_cfg.get("rayleigh", 0.05)))
+    rayleigh_mass = float(rod_cfg.get("rayleigh_mass", 1e-3))
     solver_node.addObject(
         "EulerImplicitSolver",
-        rayleighStiffness=rayleigh,
-        rayleighMass=1e-3,
+        rayleighStiffness=rayleigh_stiffness,
+        rayleighMass=rayleigh_mass,
     )
     solver_node.addObject(
         "SparseLDLSolver",
@@ -383,6 +384,6 @@ def _build_params(rod_cfg: dict) -> Parameters:
         beam_length=length,
     )
     params = Parameters(beam_geo_params=geometry, beam_physics_params=physics)
-    params.simu_params.rayleigh_stiffness = float(rod_cfg.get("rayleigh", 0.05))
-    params.simu_params.rayleigh_mass = 1e-3
+    params.simu_params.rayleigh_stiffness = float(rod_cfg.get("rayleigh_stiffness", rod_cfg.get("rayleigh", 0.05)))
+    params.simu_params.rayleigh_mass = float(rod_cfg.get("rayleigh_mass", 1e-3))
     return params

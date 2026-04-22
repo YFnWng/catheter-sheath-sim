@@ -38,7 +38,7 @@ class SweepGenerator(InputGenerator):
         n_rotation: int = 7,
         n_cable: int = 10,
         ramp_speed: float = 0.3,
-        dwell_time: float = 0.5,
+        dwell_time: float = 0.0,
     ) -> None:
         super().__init__(joint_lower_limits, joint_upper_limits, dt)
         self._dwell = dwell_time
@@ -66,7 +66,15 @@ class SweepGenerator(InputGenerator):
         if not self._waypoints:
             return []
         segments = []
-        prev = self._waypoints[0].copy()
+        # Start from zero actuations (matching init config), ramp to first waypoint
+        prev = np.zeros_like(self._waypoints[0])
+        first_delta = self.shortest_rotation_delta(prev, self._waypoints[0])
+        abs_first = np.abs(first_delta)
+        safe_rate = np.where(self._ramp_rate > 1e-12, self._ramp_rate, 1.0)
+        if np.max(abs_first) > 1e-8:
+            ramp_to_first = max(np.max(abs_first / safe_rate), self.dt)
+            segments.append((ramp_to_first, prev.copy(), first_delta))
+            prev = prev + first_delta
         segments.append((self._dwell, prev.copy(), np.zeros_like(prev)))
         for wp in self._waypoints[1:]:
             delta = self.shortest_rotation_delta(prev, wp)

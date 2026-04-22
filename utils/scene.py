@@ -68,7 +68,7 @@ def add_scene_utilities(root: Sofa.Core.Node) -> None:
     root.addObject(
         "RuleBasedContactManager",
         name="ContactManager",
-        responseParams="mu=0.15",
+        responseParams="mu=0.0",
         response="FrictionContactConstraint",
     )
     root.addObject(

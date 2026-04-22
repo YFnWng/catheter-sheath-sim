@@ -17,17 +17,19 @@ class TrajectoryRecord:
 
     Fields
     ------
-    timestamps : simulation time (s)
+    timestamps : simulation time (s) — recorded at begin of step
     frame_poses : (n_frames, 7) Rigid3d per frame
     strain_coords : (n_sections, 3) curvature per section
     joint_commands : (n_joints,) control input [insertion, rotation, cable, ...]
     contact_force_body : (n_frames, 3) per-node contact force in body frame
+    tip_force : (3,) random external force applied to tip [Fx, Fy, Fz]
     """
     timestamps: List[float] = field(default_factory=list)
     frame_poses: List[np.ndarray] = field(default_factory=list)
     strain_coords: List[np.ndarray] = field(default_factory=list)
     joint_commands: List[np.ndarray] = field(default_factory=list)
     contact_force_body: List[np.ndarray] = field(default_factory=list)
+    tip_force: List[np.ndarray] = field(default_factory=list)
 
     def append(
         self,
@@ -36,12 +38,15 @@ class TrajectoryRecord:
         strain_coords: np.ndarray,
         joint_commands: np.ndarray,
         contact_force_body: np.ndarray,
+        tip_force: np.ndarray = None,
     ) -> None:
         self.timestamps.append(t)
         self.frame_poses.append(frame_poses.copy())
         self.strain_coords.append(strain_coords.copy())
         self.joint_commands.append(joint_commands.copy())
         self.contact_force_body.append(contact_force_body.copy())
+        self.tip_force.append(tip_force.copy() if tip_force is not None
+                              else np.zeros(3))
 
     def finalise(self) -> Dict[str, np.ndarray]:
         """Stack lists into contiguous arrays for HDF5 writing."""
@@ -51,6 +56,7 @@ class TrajectoryRecord:
             "strain_coords": np.stack(self.strain_coords).astype(np.float64),
             "joint_commands": np.stack(self.joint_commands).astype(np.float64),
             "contact_force_body": np.stack(self.contact_force_body).astype(np.float64),
+            "tip_force": np.stack(self.tip_force).astype(np.float64),
         }
 
 

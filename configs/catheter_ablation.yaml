@@ -10,7 +10,8 @@ rod:
   mass: 0.04             # kg
   # young_modulus: 2.0e9   # Pa
   # poisson_ratio: 0.38
-  rayleigh: 0.5         # Rayleigh stiffness damping coefficient
+  rayleigh_stiffness: 0.7   # Rayleigh stiffness damping (damps high-freq oscillations)
+  rayleigh_mass: 1.0e-1     # Rayleigh mass damping (damps low-freq/rigid-body motion)
   # Variable stiffness — omit this block for uniform E/nu along the rod.
   # node_indices: section boundaries where properties change (ascending).
   # young_modulus / poisson_ratio: one value per segment, or length 1 for uniform.
@@ -33,7 +34,7 @@ actuation:
   # Keyboard controller
   insertion_direction: [0.0, 0.0, 1.0]  # unit vector in local frame
   insertion_speed: 30.0e-3   # m/s  (was 30 mm/s)
-  max_travel: 160.0e-3       # m    (was 160 mm)
+  max_travel: 80.0e-3       # m    (was 160 mm)
   rotation_speed: 30.0       # deg/s
   max_rotation: 180.0        # degrees
 
@@ -46,3 +47,9 @@ actuation:
     pull_min: 0.0            # N
     pull_max: 50.0           # N    (was 5 N with mm units)
     pull_increment: 3.0    # N/s
+
+# Random tip force perturbation during data collection.
+# Smooth band-limited force applied to the rod tip (sum of sinusoids).
+# Set max_force to 0 to disable.
+tip_force:
+  max_force: 0.5             # N (peak magnitude per axis)

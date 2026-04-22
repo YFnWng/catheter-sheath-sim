@@ -66,6 +66,9 @@ class DataCollectorController(Sofa.Core.Controller):
             np.asarray(init_sc, dtype=float) if init_sc is not None else None
         )
         self._strain_mo = kwargs.pop("strain_mechanical_object", None)
+        # Insertion offset: back-calculated from initial base_pose so the
+        # generator's joint commands are relative to the init configuration.
+        self._insertion_offset = float(kwargs.pop("insertion_offset", 0.0))
 
         self._base_home_position = np.asarray(
             kwargs.pop("base_position", np.zeros(3)), dtype=float,
@@ -86,10 +89,31 @@ class DataCollectorController(Sofa.Core.Controller):
         if self._cable_constraint is not None:
             self._cable_data = self._cable_constraint.findData("value")
 
+        # Random tip force (smooth band-limited perturbation)
+        self._tip_force_field = kwargs.pop("tip_force_field", None)
+        tip_force_max = kwargs.pop("tip_force_max", 0.0)
+        tip_force_seed = kwargs.pop("tip_force_seed", 42)
+        self._tip_force_data = None
+        if self._tip_force_field is not None and tip_force_max > 0:
+            self._tip_force_data = self._tip_force_field.findData("forces")
+            n_harmonics = 5
+            freq_range = (0.05, 0.5)
+            rng = np.random.RandomState(tip_force_seed)
+            self._tip_amplitudes = rng.uniform(0, tip_force_max, (3, n_harmonics))
+            self._tip_frequencies = rng.uniform(freq_range[0], freq_range[1], (3, n_harmonics))
+            self._tip_phases = np.zeros((3, n_harmonics))  # start at zero force
+            # Normalize so peak per axis ≈ tip_force_max
+            for ax in range(3):
+                total = self._tip_amplitudes[ax].sum()
+                if total > 1e-12:
+                    self._tip_amplitudes[ax] *= tip_force_max / total
+
         self._record = TrajectoryRecord()
         self._step_count = 0
         self._done = False
         self._t_start: Optional[float] = None
+        self._joint_cmd = np.zeros(3)
+        self._t_begin = 0.0
 
     def onAnimateBeginEvent(self, _event) -> None:
         if self._done:
@@ -99,56 +123,55 @@ class DataCollectorController(Sofa.Core.Controller):
 
         self._step_count += 1
 
-        # During warmup, hold at initial physical state to let rod settle
-        if self._step_count <= self._warmup_steps:
+        # On first step, apply initial state and set rest positions so the
+        # solver naturally maintains the configuration.
+        if self._step_count == 1:
             self._apply_initial_state()
-            return
+            return  # let solver run one step with correct state before generator
 
-        dt = float(self._base_mo.getContext().dt.value)
         t_sim = float(self._base_mo.getContext().time.value)
         if self._t_start is None:
             self._t_start = t_sim
 
         t = t_sim - self._t_start
+        self._t_begin = t
 
         if self._generator.is_done(t):
             self._finish()
             return
 
-        joint_cmd = self._generator.step(t)
-        joint_cmd = np.clip(joint_cmd, self._generator.joint_lower,
-                            self._generator.joint_upper)
-        self._apply_joint_commands(joint_cmd)
+        self._joint_cmd = self._generator.step(t)
+        self._joint_cmd = np.clip(self._joint_cmd, self._generator.joint_lower,
+                                  self._generator.joint_upper)
+        self._apply_joint_commands(self._joint_cmd)
+        self._update_tip_force(t)
 
     def onAnimateEndEvent(self, _event) -> None:
-        if self._done or self._step_count <= self._warmup_steps:
+        if self._done or self._step_count <= 1:
             return
 
-        t_sim = float(self._base_mo.getContext().time.value)
         sofa_gt = self._reader.read()
-        t = t_sim - self._t_start if self._t_start is not None else 0.0
 
-        if self._generator.is_done(t):
-            return
-
-        joint_cmd = self._generator.step(t)
-        joint_cmd = np.clip(joint_cmd, self._generator.joint_lower,
-                            self._generator.joint_upper)
+        tip_force = np.zeros(3)
+        if self._tip_force_data is not None:
+            forces = np.array(self._tip_force_data.value).flat
+            tip_force = np.array(forces[:3])
 
         self._record.append(
-            t=t_sim,
+            t=self._t_begin,
             frame_poses=sofa_gt.frame_poses,
             strain_coords=sofa_gt.strain_coords,
-            joint_commands=joint_cmd,
+            joint_commands=self._joint_cmd,
             contact_force_body=sofa_gt.contact_force_body,
+            tip_force=tip_force,
         )
 
     def _apply_initial_state(self) -> None:
-        """Write saved base_pose and strain_coords directly to SOFA MOs.
+        """Write saved base_pose and strain_coords to SOFA MOs.
 
-        Called each warmup step so the solver holds the rod in the
-        desired configuration while transients settle.  Cable constraint
-        stays at zero (all trajectories start from zero actuations).
+        Sets both ``position`` and ``rest_position`` on the strain MO so
+        the beam stiffness forces pull toward the init shape (not straight).
+        Called once on the first step after ``Sofa.Simulation.init()``.
         """
         if self._initial_base_pose is not None:
             bp = self._initial_base_pose
@@ -165,10 +188,32 @@ class DataCollectorController(Sofa.Core.Controller):
                 n = min(len(sc), len(strain_pos))
                 for i in range(n):
                     strain_pos[i][:] = sc[i]
+            # Set rest_position so elastic forces maintain the bent shape
+            if hasattr(self._strain_mo, "rest_position"):
+                with self._strain_mo.rest_position.writeable() as rest:
+                    n = min(len(sc), len(rest))
+                    for i in range(n):
+                        rest[i][:] = sc[i]
+
+    def _update_tip_force(self, t: float) -> None:
+        """Set the tip ConstantForceField to a smooth random force at time *t*."""
+        if self._tip_force_data is None:
+            return
+        force = np.zeros(3)
+        for ax in range(3):
+            force[ax] = np.sum(
+                self._tip_amplitudes[ax]
+                * np.sin(2 * np.pi * self._tip_frequencies[ax] * t
+                         + self._tip_phases[ax])
+            )
+        self._tip_force_data.value = [[
+            float(force[0]), float(force[1]), float(force[2]),
+            0.0, 0.0, 0.0,
+        ]]
 
     def _apply_joint_commands(self, joint_cmd: np.ndarray) -> None:
         """Apply [insertion, rotation, cable] to SOFA objects."""
-        insertion = joint_cmd[0]
+        insertion = joint_cmd[0] + self._insertion_offset
         rotation_deg = joint_cmd[1]
         cable_val = joint_cmd[2]
 
@@ -192,6 +237,9 @@ class DataCollectorController(Sofa.Core.Controller):
 
     def _finish(self) -> None:
         self._done = True
+        # Zero tip force
+        if self._tip_force_data is not None:
+            self._tip_force_data.value = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
         n = len(self._record.timestamps)
         print(f"[DataCollector] Trajectory complete: {n} timesteps recorded.")
         os.makedirs(os.path.dirname(os.path.abspath(self._output_path)), exist_ok=True)

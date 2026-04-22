@@ -33,6 +33,7 @@ class PlotController(Sofa.Core.Controller):
         self._base_home = np.asarray(
             kwargs.pop("base_home_position", [0.0, 0.0, 0.0]), dtype=float,
         )
+        self._tip_force_field = kwargs.pop("tip_force_field", None)
 
     def onAnimateBeginEvent(self, _event):
         sofa_gt = self._reader.read()
@@ -49,15 +50,26 @@ class PlotController(Sofa.Core.Controller):
         else:
             cable_tensions = np.zeros(1)
 
-        # Contact force (body frame, per node)
+        # External force (body frame, per node): contact + tip load
         gt_F = np.zeros((self._n_nodes, 3), dtype=np.float32)
         n = min(self._n_nodes, len(sofa_gt.contact_force_body))
         gt_F[:n] = sofa_gt.contact_force_body[:n]
 
-        self._plotter.send({
+        tip_force_3d = np.zeros(3)
+        if self._tip_force_field is not None:
+            forces = np.array(self._tip_force_field.findData("forces").value)
+            if forces.size >= 3:
+                tip_force_3d = forces.flat[:3].copy()
+                # Add tip load to the last node in the spatial plot
+                gt_F[-1] += tip_force_3d
+
+        plot_data = {
             "t": t,
             "base_pos": base_pos,
             "base_rot": base_rot_deg,
             "cable_tensions": cable_tensions,
             "gt_F": gt_F,
-        })
+            "tip_load": tip_force_3d,
+        }
+
+        self._plotter.send(plot_data)

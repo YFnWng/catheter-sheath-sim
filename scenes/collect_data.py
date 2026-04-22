@@ -133,6 +133,8 @@ def _obj_name(entry):
 
 
 def _scene_tag(scene_objects):
+    if not scene_objects:
+        return "free_space"
     return "_".join(_obj_name(e) for e in scene_objects)
 
 
@@ -282,14 +284,35 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
     init_yaml_path : str
         Path to the YAML file (used by _InitSaveController to write back).
     """
-    _DEFAULT_INIT_WARMUP = 200  # steps to settle when initial_config is set
+    # (warmup removed — initial state applied once, solver maintains it)
+
+    # Detect init mode (set by _run_init_mode via env vars on each subprocess)
+    _init_idx_str = os.environ.get("_INIT_SCENE_IDX")
+    if _init_idx_str is not None and not init_mode:
+        yaml_path = os.environ.get("_INIT_YAML_PATH", "")
+        scene_idx = int(_init_idx_str)
+        scenes = _load_scenes(yaml_path or None)
+        scene_dict = scenes[min(scene_idx, len(scenes) - 1)]
+        init_mode = True
+        init_scene_idx = scene_idx
+        init_yaml_path = yaml_path
 
     with open(_ROBOT_CONFIG_PATH) as f:
         cfg = yaml.safe_load(f)
 
+    # Read scene index from file to bypass runSofa's module caching.
+    # Change the index by editing /tmp/collect_scene_idx.txt (just a number).
+    _scene_idx_file = "/tmp/collect_scene_idx.txt"
+    _default_idx = 0
+    if os.path.isfile(_scene_idx_file):
+        try:
+            with open(_scene_idx_file) as _f:
+                _default_idx = int(_f.read().strip())
+        except (ValueError, OSError):
+            pass
     if scene_dict is None:
         scenes = _load_scenes()
-        scene_idx = int(os.environ.get("COLLECT_SCENE_IDX", "0"))
+        scene_idx = int(os.environ.get("COLLECT_SCENE_IDX", str(_default_idx)))
         scene_dict = scenes[min(scene_idx, len(scenes) - 1)]
 
     scene_objects = _get_scene_objects(scene_dict)
@@ -308,6 +331,23 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
     robot = CatheterRobot(root, config_path=_ROBOT_CONFIG_PATH, cable_mode=cable_mode)
     strain_mo = robot._prefab.cosseratCoordinate.cosseratCoordinateMO
 
+    # NOTE: Do NOT write initial_config here — Sofa.Simulation.init() applies
+    # the MO's translation/rotation params on top of position, which would
+    # double-transform the saved state.  The controller applies it on step 1
+    # (after init).
+
+    # Tip force field for random perturbation during data collection
+    rod_cfg = cfg.get("rod", {})
+    n_frames = int(rod_cfg.get("n_frames", 32)) + 1  # geometry appends tip
+    tip_frame_idx = n_frames - 1
+    tip_force_field = robot._prefab.cosseratFrame.addObject(
+        "ConstantForceField",
+        name="tipForce",
+        indices=[tip_frame_idx],
+        forces=[[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+        showArrowSize=0.01,
+    )
+
     reader = SofaReader(
         prefab=robot._prefab,
         base_mo=robot.base_mo,
@@ -318,7 +358,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
 
     dt = float(root.dt.value)
 
-    # ── Mode-specific controller ───────────────────────────────���──────
+    # ── Mode-specific controller ─────────────────────────────────────
     if init_mode:
         from controllers.keyboard_controller import CatheterKeyboardController
 
@@ -363,8 +403,6 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
     else:
         gen_name = os.environ.get("COLLECT_GENERATOR", "sweep")
         output_path = os.environ.get("COLLECT_OUTPUT", "")
-        warmup_steps_env = os.environ.get("COLLECT_WARMUP")
-
         if not output_path:
             data_dir = os.path.join(_SIM_DIR, "data_collection", "data")
             ts = time.strftime("%Y%m%d_%H%M%S")
@@ -390,22 +428,27 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         if initial_config:
             metadata["initial_config"] = initial_config
 
-        # Warmup
-        if warmup_steps_env is not None:
-            warmup_steps = int(warmup_steps_env)
-        elif initial_config:
-            warmup_steps = _DEFAULT_INIT_WARMUP
-        else:
-            warmup_steps = 0
-
-        # Extract initial physical state
+        # Extract initial physical state + back-calculate insertion offset
         init_base_pose = None
         init_strain_coords = None
+        insertion_offset = 0.0
         if initial_config:
             if "base_pose" in initial_config:
                 init_base_pose = np.array(initial_config["base_pose"], dtype=float)
+                # Back-calculate insertion from saved base_pose
+                from scipy.spatial.transform import Rotation as Rot
+                base_home = np.array(robot.base_position, dtype=float)
+                offset = init_base_pose[:3] - base_home
+                home_rot = Rot.from_quat(np.array(robot.base_orientation))
+                local_dir = np.array(robot.insertion_direction, dtype=float)
+                world_dir = local_dir @ home_rot.as_matrix().T
+                world_dir = world_dir / np.linalg.norm(world_dir)
+                insertion_offset = float(np.dot(offset, world_dir))
             if "strain_coords" in initial_config:
                 init_strain_coords = np.array(initial_config["strain_coords"], dtype=float)
+
+        tip_force_cfg = cfg.get("tip_force", {})
+        tip_force_max = float(tip_force_cfg.get("max_force", 0.5))
 
         controller = DataCollectorController(
             name="DataCollectorController",
@@ -418,11 +461,13 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             base_orientation=robot.base_orientation,
             prefab_rotation_offset=robot.prefab_rotation_offset,
             output_path=output_path,
-            warmup_steps=warmup_steps,
             metadata=metadata,
             initial_base_pose=init_base_pose,
             initial_strain_coords=init_strain_coords,
             strain_mechanical_object=strain_mo,
+            insertion_offset=insertion_offset,
+            tip_force_field=tip_force_field,
+            tip_force_max=tip_force_max,
         )
         root.addObject(controller)
         title = f"Data Collection — {tag}"
@@ -439,7 +484,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             n_sections=n_sections,
             rod_length=float(rod_cfg.get("length", 0.16)),
             panels=("base_translation", "base_rotation",
-                    "tendon_force", "contact_force"),
+                    "tendon_force", "contact_force", "tip_load"),
             window_seconds=10.0,
             dt=dt,
             n_cables=n_cables,
@@ -453,6 +498,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
                 reader=reader,
                 n_nodes=n_nodes,
                 base_home_position=robot.base_position,
+                tip_force_field=tip_force_field,
             )
         )
 
@@ -598,25 +644,6 @@ def run_headless():
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
-
-# When loaded by runSofa with _INIT_SCENE_IDX set, override createScene
-# to open the init-mode scene for that specific index.
-_init_idx_env = os.environ.get("_INIT_SCENE_IDX")
-if _init_idx_env is not None:
-    _createScene_real = createScene
-    _yaml_path = os.environ["_INIT_YAML_PATH"]
-    _scene_idx = int(_init_idx_env)
-    with open(_yaml_path) as _f:
-        _data = yaml.safe_load(_f) or {}
-    _scenes = [_normalize_scene(s) for s in _data.get("scenes", [])]
-    _scene_dict = _scenes[_scene_idx]
-
-    def createScene(root, _sd=_scene_dict, _si=_scene_idx, _yp=_yaml_path):
-        return _createScene_real(
-            root, scene_dict=_sd, init_mode=True,
-            init_scene_idx=_si, init_yaml_path=_yp,
-        )
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Data collection / manual init")
