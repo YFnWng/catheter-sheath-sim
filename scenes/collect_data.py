@@ -263,7 +263,8 @@ class _InitSaveController(Sofa.Core.Controller):
 # ── Unified scene builder ───────────────────────────────────────────��────
 
 def createScene(root: Sofa.Core.Node, headless: bool = False,
-                scene_dict=None, init_mode: bool = False,
+                scene_dict=None, scene_index: int = -1,
+                init_mode: bool = False,
                 init_scene_idx: int = 0,
                 init_yaml_path: str = "") -> Sofa.Core.Node:
     """Build a data-collection or manual-init scene.
@@ -312,8 +313,8 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             pass
     if scene_dict is None:
         scenes = _load_scenes()
-        scene_idx = int(os.environ.get("COLLECT_SCENE_IDX", str(_default_idx)))
-        scene_dict = scenes[min(scene_idx, len(scenes) - 1)]
+        scene_index = int(os.environ.get("COLLECT_SCENE_IDX", str(_default_idx)))
+        scene_dict = scenes[min(scene_index, len(scenes) - 1)]
 
     scene_objects = _get_scene_objects(scene_dict)
     initial_config = _get_initial_config(scene_dict)
@@ -404,9 +405,10 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         gen_name = os.environ.get("COLLECT_GENERATOR", "sweep")
         output_path = os.environ.get("COLLECT_OUTPUT", "")
         if not output_path:
-            data_dir = os.path.join(_SIM_DIR, "data_collection", "data")
+            data_dir = os.path.join(_SIM_DIR, "data_collection", "data", "random_scenes")
             ts = time.strftime("%Y%m%d_%H%M%S")
-            output_path = os.path.join(data_dir, f"{gen_name}_{tag}_{ts}.h5")
+            idx_str = f"{scene_index:03d}" if scene_index >= 0 else "x"
+            output_path = os.path.join(data_dir, f"{gen_name}_{idx_str}_{ts}.h5")
 
         joint_lower = np.array(robot.joint_lower_limits, dtype=float)
         joint_upper = np.array(robot.joint_upper_limits, dtype=float)
@@ -584,7 +586,7 @@ def _run_one_scene(scene_dict, scene_idx, total_scenes):
     label = ", ".join(_obj_label(e) for e in scene_objects)
 
     root = Sofa.Core.Node("root")
-    createScene(root, headless=True, scene_dict=scene_dict)
+    createScene(root, headless=True, scene_dict=scene_dict, scene_index=scene_idx)
     Sofa.Simulation.init(root)
 
     dt = root.dt.value

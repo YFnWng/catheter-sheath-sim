@@ -14,6 +14,7 @@ def ensure_sofa_paths() -> None:
     """Add SOFA plugin Python site-packages to sys.path if missing."""
     sofa_root = os.environ.get("SOFA_ROOT", "/opt/SOFA/v25.12.00")
     plugin_dirs = [
+        os.path.join(sofa_root, "plugins", "SofaPython3", "lib", "python3", "site-packages"),
         os.path.join(sofa_root, "plugins", "STLIB", "lib", "python3", "site-packages"),
         os.path.join(sofa_root, "plugins", "Cosserat", "lib", "python3", "site-packages"),
         os.path.join(sofa_root, "plugins", "SoftRobots", "lib", "python3", "site-packages"),

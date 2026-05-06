@@ -25,6 +25,7 @@ rod:
   base_orientation_euler_xyz_deg: [0.0, 0.0, 0.0]
   # Rotates the Cosserat prefab so its local-X rod axis aligns with scene local-Z
   prefab_rotation_euler_xyz_deg: [0.0, -90.0, 0.0]
+  proximal_node_idx: 25
 
 actuation:
   cable_mode: force   # displacement | force

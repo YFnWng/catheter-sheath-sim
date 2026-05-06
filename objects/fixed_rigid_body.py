@@ -141,7 +141,7 @@ class HeartModel(FixedRigidBody):
 
     _DEFAULTS = dict(
         mesh_path=HEART_MESH, name="Heart",
-        position=[60.0e-3, -75.0e-3, -20.0e-3],
+        position=[60.0e-3, -75.0e-3, 20.0e-3],
         orientation_euler_xyz_deg=[-55.0, -20.0, 0.0],
         scale=1.0e-3, color=[0.85, 0.1, 0.1, 0.5],
     )
@@ -218,7 +218,7 @@ class SlabModel(FixedRigidBody):
         mesh_path=SLAB_MESH, name="Slab",
         position=[0.0, 0.0, 0.0],
         orientation_euler_xyz_deg=[0.0, 0.0, 0.0],
-        scale=1.0e-2, color=[0.7, 0.7, 0.7, 1.0],
+        scale=1.0e-2, color=[0.7, 0.7, 0.7, 0.5],
     )
 
     def __init__(self, root: Sofa.Core.Node, **overrides) -> None:

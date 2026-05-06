@@ -108,6 +108,7 @@ def add_constant_forces(
             template="Rigid3d",
             indices=[idx],
             forces=[[float(f[0]), float(f[1]), float(f[2]), 0.0, 0.0, 0.0]],
+            showArrowSize=0.01,
         )
         ffs.append(ff)
     return ffs

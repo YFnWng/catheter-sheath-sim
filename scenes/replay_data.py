@@ -33,10 +33,15 @@ _SIM_DIR = os.path.normpath(os.path.join(_THIS_DIR, ".."))
 _WORKSPACE = os.path.normpath(os.path.join(_SIM_DIR, ".."))
 _DATA_DIR = os.path.join(_SIM_DIR, "data_collection", "data")
 
-if _SIM_DIR not in sys.path:
-    sys.path.insert(0, _SIM_DIR)
+# _SIM_DIR must come before _WORKSPACE on sys.path so that
+# ``import utils`` resolves to simulation/utils/ (package) rather than
+# state_estimation/utils.py (file).  Force position 0 unconditionally
+# because runSofa may have already added paths.
 if _WORKSPACE not in sys.path:
     sys.path.insert(0, _WORKSPACE)
+if _SIM_DIR in sys.path:
+    sys.path.remove(_SIM_DIR)
+sys.path.insert(0, _SIM_DIR)
 
 import Sofa
 import Sofa.Core
@@ -180,6 +185,31 @@ def createScene(root: Sofa.Core.Node) -> Sofa.Core.Node:
     rod_visual.addObject(
         "IdentityMapping",
         input="@../RodMO", output="@RodLine",
+    )
+
+    # Proximal node trajectory — static line showing the full path
+    import yaml as _yaml
+    _sim_cfg_path = os.path.join(_SIM_DIR, "configs", "catheter_ablation.yaml")
+    with open(_sim_cfg_path) as _f:
+        _sim_cfg = _yaml.safe_load(_f)
+    prox_idx = _sim_cfg.get("rod", {}).get("proximal_node_idx", 0)
+    prox_positions = frame_poses[:, prox_idx, :3].tolist()
+    prox_edges = [[k, k + 1] for k in range(n_steps - 1)]
+    traj_node = root.addChild("ProximalTrajectory")
+    traj_node.addObject(
+        "MechanicalObject", name="TrajMO", template="Vec3d",
+        position=prox_positions,
+    )
+    traj_node.addObject("EdgeSetTopologyContainer", edges=prox_edges)
+    traj_visual = traj_node.addChild("Visual")
+    traj_visual.addObject(
+        "OglModel", name="TrajLine",
+        color=[0.2, 0.5, 1.0, 0.6],
+        edges=prox_edges,
+    )
+    traj_visual.addObject(
+        "IdentityMapping",
+        input="@../TrajMO", output="@TrajLine",
     )
 
     # Diagnostic plotter
