@@ -35,3 +35,5 @@ class SofaGroundTruth:
     contact_force_body: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3))
     )
+    frame_velocity: Optional[np.ndarray] = None   # (n_frames, 6) Rigid3d velocity
+    strain_velocity: Optional[np.ndarray] = None   # (n_sections, 3) strain rate

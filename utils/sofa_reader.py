@@ -102,6 +102,19 @@ class SofaReader:
         n_sections = len(strain_coords)
         contact_force_body = self._read_contact_forces(frame_poses, n_sections)
 
+        # Velocities
+        frame_vel = np.array(
+            self._frame_mo.velocity.value, dtype=float,
+        )
+        strain_vel_sofa = np.array(
+            self._prefab.cosseratCoordinate.cosseratCoordinateMO.velocity.value,
+            dtype=float,
+        )
+        if self._strain_rot is not None:
+            strain_vel = strain_vel_sofa @ self._strain_rot.T
+        else:
+            strain_vel = strain_vel_sofa
+
         return SofaGroundTruth(
             frame_poses=frame_poses,
             strain_coords=strain_coords,
@@ -109,6 +122,8 @@ class SofaReader:
             cable_disp=cable_disp,
             cable_tensions=cable_tensions,
             contact_force_body=contact_force_body,
+            frame_velocity=frame_vel,
+            strain_velocity=strain_vel,
         )
 
     def _read_contact_forces(self, frame_poses: np.ndarray, n_sections: int) -> np.ndarray:

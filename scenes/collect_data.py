@@ -66,10 +66,11 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SIM_DIR = os.path.normpath(os.path.join(_THIS_DIR, ".."))
 _WORKSPACE = os.path.normpath(os.path.join(_SIM_DIR, ".."))
 
-if _SIM_DIR not in sys.path:
-    sys.path.insert(0, _SIM_DIR)
 if _WORKSPACE not in sys.path:
     sys.path.insert(0, _WORKSPACE)
+if _SIM_DIR in sys.path:
+    sys.path.remove(_SIM_DIR)
+sys.path.insert(0, _SIM_DIR)
 
 from utils.sofa_env import ensure_sofa_paths
 ensure_sofa_paths()
@@ -77,6 +78,7 @@ ensure_sofa_paths()
 import Sofa
 import Sofa.Core
 import Sofa.Simulation
+from Sofa import SofaLinearSolver  # noqa: F401 — registers .A()/.b()/.x() on solvers
 
 from utils.scene import add_required_plugins, add_scene_utilities
 from utils.message_handler import SofaMessageHandler
@@ -266,7 +268,8 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
                 scene_dict=None, scene_index: int = -1,
                 init_mode: bool = False,
                 init_scene_idx: int = 0,
-                init_yaml_path: str = "") -> Sofa.Core.Node:
+                init_yaml_path: str = "",
+                output_dir: str = "") -> Sofa.Core.Node:
     """Build a data-collection or manual-init scene.
 
     Parameters
@@ -405,7 +408,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         gen_name = os.environ.get("COLLECT_GENERATOR", "sweep")
         output_path = os.environ.get("COLLECT_OUTPUT", "")
         if not output_path:
-            data_dir = os.path.join(_SIM_DIR, "data_collection", "data", "random_scenes")
+            data_dir = output_dir or os.getcwd()
             ts = time.strftime("%Y%m%d_%H%M%S")
             idx_str = f"{scene_index:03d}" if scene_index >= 0 else "x"
             output_path = os.path.join(data_dir, f"{gen_name}_{idx_str}_{ts}.h5")
@@ -420,6 +423,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         generator = gen_cls(joint_lower, joint_upper, dt)
 
         metadata = {
+            "task": tag,
             "config_path": _ROBOT_CONFIG_PATH,
             "cable_mode": cable_mode,
             "dt": dt,
@@ -473,6 +477,38 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         )
         root.addObject(controller)
         title = f"Data Collection — {tag}"
+
+    # ── Matrix analysis (GUI modes only, runs once after init) ────────
+    if not headless:
+        from utils.matrix_analysis import analyze_damping
+
+        class _MatrixAnalysisController(Sofa.Core.Controller):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._robot = kwargs.pop("robot")
+                self._solver_node = kwargs.pop("solver_node")
+                self._step = 0
+
+            def onAnimateEndEvent(self, _event):
+                # Run after the first solve completes so A() is populated
+                self._step += 1
+                if self._step != 1:
+                    return
+                try:
+                    analyze_damping(self._robot, self._solver_node)
+                except Exception as e:
+                    import traceback
+                    print(f"[matrix_analysis] Failed: {e}")
+                    traceback.print_exc()
+
+        solver_node_obj = root.getChild("CatheterSimulation")
+        root.addObject(
+            _MatrixAnalysisController(
+                name="MatrixAnalysis",
+                robot=robot,
+                solver_node=solver_node_obj,
+            )
+        )
 
     # ── Plotter (GUI modes only) ──────────────────────────────────────
     if not headless:
@@ -571,7 +607,7 @@ def _run_init_mode(yaml_path, scene_indices=None):
 # True headless entry point — runs ALL scenes sequentially
 # ---------------------------------------------------------------------------
 
-def _run_one_scene(scene_dict, scene_idx, total_scenes):
+def _run_one_scene(scene_dict, scene_idx, total_scenes, output_dir=""):
     """Run one scene headless and return (n_steps, wall_time)."""
     max_steps = int(os.environ.get("COLLECT_MAX_STEPS", "0"))
     scene_objects = _get_scene_objects(scene_dict)
@@ -586,7 +622,8 @@ def _run_one_scene(scene_dict, scene_idx, total_scenes):
     label = ", ".join(_obj_label(e) for e in scene_objects)
 
     root = Sofa.Core.Node("root")
-    createScene(root, headless=True, scene_dict=scene_dict, scene_index=scene_idx)
+    createScene(root, headless=True, scene_dict=scene_dict, scene_index=scene_idx,
+                output_dir=output_dir)
     Sofa.Simulation.init(root)
 
     dt = root.dt.value
@@ -623,7 +660,7 @@ def _run_one_scene(scene_dict, scene_idx, total_scenes):
     return step, elapsed
 
 
-def run_headless():
+def run_headless(output_dir=""):
     """Run all scenes from the scenes YAML config sequentially."""
     scenes = _load_scenes()
     print(f"[collect_data] {len(scenes)} scene(s) to collect")
@@ -634,7 +671,8 @@ def run_headless():
 
     with msg_handler:
         for i, scene_dict in enumerate(scenes):
-            steps, elapsed = _run_one_scene(scene_dict, i, len(scenes))
+            steps, elapsed = _run_one_scene(scene_dict, i, len(scenes),
+                                            output_dir=output_dir)
             total_steps += steps
             total_time += elapsed
 
@@ -656,6 +694,8 @@ if __name__ == "__main__":
                         help="Path to scenes YAML file (overrides COLLECT_SCENES)")
     parser.add_argument("--scene-idx", type=int, nargs="+", default=None,
                         help="Specific scene indices to init (default: all)")
+    parser.add_argument("--output-dir", type=str, default="",
+                        help="Output directory for HDF5 files (default: cwd)")
     args = parser.parse_args()
 
     if args.scenes:
@@ -665,4 +705,4 @@ if __name__ == "__main__":
         yaml_path = args.scenes or os.environ.get("COLLECT_SCENES", "") or _SCENES_CONFIG_PATH
         _run_init_mode(yaml_path, scene_indices=args.scene_idx)
     else:
-        run_headless()
+        run_headless(output_dir=args.output_dir)

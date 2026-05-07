@@ -23,6 +23,8 @@ class TrajectoryRecord:
     joint_commands : (n_joints,) control input [insertion, rotation, cable, ...]
     contact_force_body : (n_frames, 3) per-node contact force in body frame
     tip_force : (3,) random external force applied to tip [Fx, Fy, Fz]
+    frame_velocity : (n_frames, 6) Rigid3d velocity per frame
+    strain_velocity : (n_sections, 3) strain rate per section
     """
     timestamps: List[float] = field(default_factory=list)
     frame_poses: List[np.ndarray] = field(default_factory=list)
@@ -30,6 +32,8 @@ class TrajectoryRecord:
     joint_commands: List[np.ndarray] = field(default_factory=list)
     contact_force_body: List[np.ndarray] = field(default_factory=list)
     tip_force: List[np.ndarray] = field(default_factory=list)
+    frame_velocity: List[np.ndarray] = field(default_factory=list)
+    strain_velocity: List[np.ndarray] = field(default_factory=list)
 
     def append(
         self,
@@ -39,6 +43,8 @@ class TrajectoryRecord:
         joint_commands: np.ndarray,
         contact_force_body: np.ndarray,
         tip_force: np.ndarray = None,
+        frame_velocity: np.ndarray = None,
+        strain_velocity: np.ndarray = None,
     ) -> None:
         self.timestamps.append(t)
         self.frame_poses.append(frame_poses.copy())
@@ -47,10 +53,14 @@ class TrajectoryRecord:
         self.contact_force_body.append(contact_force_body.copy())
         self.tip_force.append(tip_force.copy() if tip_force is not None
                               else np.zeros(3))
+        if frame_velocity is not None:
+            self.frame_velocity.append(frame_velocity.copy())
+        if strain_velocity is not None:
+            self.strain_velocity.append(strain_velocity.copy())
 
     def finalise(self) -> Dict[str, np.ndarray]:
         """Stack lists into contiguous arrays for HDF5 writing."""
-        return {
+        arrays = {
             "timestamps": np.array(self.timestamps, dtype=np.float64),
             "frame_poses": np.stack(self.frame_poses).astype(np.float64),
             "strain_coords": np.stack(self.strain_coords).astype(np.float64),
@@ -58,6 +68,11 @@ class TrajectoryRecord:
             "contact_force_body": np.stack(self.contact_force_body).astype(np.float64),
             "tip_force": np.stack(self.tip_force).astype(np.float64),
         }
+        if self.frame_velocity:
+            arrays["frame_velocity"] = np.stack(self.frame_velocity).astype(np.float64)
+        if self.strain_velocity:
+            arrays["strain_velocity"] = np.stack(self.strain_velocity).astype(np.float64)
+        return arrays
 
 
 def write_hdf5(

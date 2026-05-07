@@ -164,6 +164,8 @@ class DataCollectorController(Sofa.Core.Controller):
             joint_commands=self._joint_cmd,
             contact_force_body=sofa_gt.contact_force_body,
             tip_force=tip_force,
+            frame_velocity=sofa_gt.frame_velocity,
+            strain_velocity=sofa_gt.strain_velocity,
         )
 
     def _apply_initial_state(self) -> None:
