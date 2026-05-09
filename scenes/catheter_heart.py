@@ -6,10 +6,13 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SIM_DIR = os.path.normpath(os.path.join(_THIS_DIR, ".."))
 _WORKSPACE = os.path.normpath(os.path.join(_SIM_DIR, ".."))
 
-if _SIM_DIR not in sys.path:
-    sys.path.insert(0, _SIM_DIR)
+# _SIM_DIR must be first so `utils.scene` resolves to simulation/utils/,
+# not state_estimation/utils.py.
+if _SIM_DIR in sys.path:
+    sys.path.remove(_SIM_DIR)
+sys.path.insert(0, _SIM_DIR)
 if _WORKSPACE not in sys.path:
-    sys.path.insert(0, _WORKSPACE)
+    sys.path.append(_WORKSPACE)
 
 import Sofa
 import Sofa.Core

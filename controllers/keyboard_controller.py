@@ -105,13 +105,16 @@ class CatheterKeyboardController(Sofa.Core.Controller):
         # The prefab offset must always be the innermost rotation so the Cosserat
         # rod axis stays aligned regardless of insertion or axial-rotation joint.
         base_orientation = (rotation * self._base_home_orientation * self._prefab_rot_offset).as_quat()
-        with self.base_mo.position.writeable() as pos:
-            pos[0][0:3] = (self.base_home_position + translation).tolist()
-            pos[0][3:7] = base_orientation.tolist()
+        target_pos = (self.base_home_position + translation).tolist()
+        target_ori = base_orientation.tolist()
+        # Only update rest_position (spring target), not position directly.
+        # The RestShapeSpringsForceField pulls the base toward the target,
+        # letting base motion propagate through rod dynamics instead of
+        # being applied as a rigid transform.
         if hasattr(self.base_mo, "rest_position") and len(self.base_mo.rest_position.value) > 0:
             with self.base_mo.rest_position.writeable() as rest:
-                rest[0][0:3] = (self.base_home_position + translation).tolist()
-                rest[0][3:7] = base_orientation.tolist()
+                rest[0][0:3] = target_pos
+                rest[0][3:7] = target_ori
 
     @staticmethod
     def _normalize(vec: Sequence[float]) -> List[float]:

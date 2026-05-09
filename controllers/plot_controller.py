@@ -44,6 +44,15 @@ class PlotController(Sofa.Core.Controller):
         base_pos = sofa_gt.base_pose[:3] - self._base_home
         base_rot_deg = R.from_quat(sofa_gt.base_pose[3:7]).as_euler("xyz", degrees=True)
 
+        # Rest (command target) pose
+        base_mo = self._reader._base_mo
+        base_rest_pos = np.zeros(3)
+        base_rest_rot_deg = np.zeros(3)
+        if hasattr(base_mo, "rest_position") and len(base_mo.rest_position.value) > 0:
+            rest = np.array(base_mo.rest_position.value[0], dtype=float)
+            base_rest_pos = rest[:3] - self._base_home
+            base_rest_rot_deg = R.from_quat(rest[3:7]).as_euler("xyz", degrees=True)
+
         # Cable tensions
         if sofa_gt.cable_tensions is not None:
             cable_tensions = sofa_gt.cable_tensions
@@ -67,6 +76,8 @@ class PlotController(Sofa.Core.Controller):
             "t": t,
             "base_pos": base_pos,
             "base_rot": base_rot_deg,
+            "base_rest_pos": base_rest_pos,
+            "base_rest_rot": base_rest_rot_deg,
             "cable_tensions": cable_tensions,
             "gt_F": gt_F,
             "tip_load": tip_force_3d,

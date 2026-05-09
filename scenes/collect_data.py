@@ -44,8 +44,8 @@ COLLECT_OUTPUT : str
     Output HDF5 path (default: auto-generated per scene).
 COLLECT_WARMUP : int
     Warmup steps before recording (default: 0).
-COLLECT_MAX_STEPS : int
-    Maximum simulation steps per scene (default: unlimited).
+COLLECT_DURATION : float
+    Maximum simulation duration in seconds per scene (default: unlimited).
 COLLECT_SCENE_IDX : int
     Scene index to run in GUI mode (default: 0).
 COLLECT_SCENES : str
@@ -420,7 +420,13 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         if gen_cls is None:
             raise ValueError(f"Unknown generator: {gen_name!r}. "
                              f"Available: {list(_GENERATORS.keys())}")
-        generator = gen_cls(joint_lower, joint_upper, dt)
+        gen_kwargs = {}
+        duration = float(os.environ.get("COLLECT_DURATION", "0"))
+        if duration > 0:
+            import inspect
+            if "duration" in inspect.signature(gen_cls.__init__).parameters:
+                gen_kwargs["duration"] = duration
+        generator = gen_cls(joint_lower, joint_upper, dt, **gen_kwargs)
 
         metadata = {
             "task": tag,
@@ -609,7 +615,7 @@ def _run_init_mode(yaml_path, scene_indices=None):
 
 def _run_one_scene(scene_dict, scene_idx, total_scenes, output_dir=""):
     """Run one scene headless and return (n_steps, wall_time)."""
-    max_steps = int(os.environ.get("COLLECT_MAX_STEPS", "0"))
+    max_duration = float(os.environ.get("COLLECT_DURATION", "0"))
     scene_objects = _get_scene_objects(scene_dict)
     initial_config = _get_initial_config(scene_dict)
 
@@ -648,8 +654,8 @@ def _run_one_scene(scene_dict, scene_idx, total_scenes, output_dir=""):
             elapsed = time.time() - t0
             print(f"  step {step}, sim_time={step * dt:.2f}s, "
                   f"wall_time={elapsed:.1f}s", flush=True)
-        if max_steps > 0 and step >= max_steps:
-            print(f"  Reached max_steps={max_steps}, forcing save.")
+        if max_duration > 0 and step * dt >= max_duration:
+            print(f"  Reached duration={max_duration:.1f}s, forcing save.")
             controller._finish()
             break
 
@@ -660,24 +666,35 @@ def _run_one_scene(scene_dict, scene_idx, total_scenes, output_dir=""):
     return step, elapsed
 
 
-def run_headless(output_dir=""):
-    """Run all scenes from the scenes YAML config sequentially."""
+def run_headless(output_dir="", scene_indices=None):
+    """Run scenes from the scenes YAML config sequentially.
+
+    Parameters
+    ----------
+    scene_indices : list[int] or None
+        If provided, only run scenes at these indices. Default: all.
+    """
     scenes = _load_scenes()
-    print(f"[collect_data] {len(scenes)} scene(s) to collect")
+    if scene_indices is not None:
+        selected = [(i, scenes[i]) for i in scene_indices if i < len(scenes)]
+    else:
+        selected = list(enumerate(scenes))
+    print(f"[collect_data] {len(selected)} scene(s) to collect "
+          f"(of {len(scenes)} total)")
 
     msg_handler = SofaMessageHandler(print_info=False)
     total_steps = 0
     total_time = 0.0
 
     with msg_handler:
-        for i, scene_dict in enumerate(scenes):
+        for i, scene_dict in selected:
             steps, elapsed = _run_one_scene(scene_dict, i, len(scenes),
                                             output_dir=output_dir)
             total_steps += steps
             total_time += elapsed
 
     print(f"\n[collect_data] All done: {total_steps} total steps "
-          f"in {total_time:.1f}s across {len(scenes)} scene(s)")
+          f"in {total_time:.1f}s across {len(selected)} scene(s)")
     print(f"[collect_data] {msg_handler.summary()}")
 
 
@@ -705,4 +722,4 @@ if __name__ == "__main__":
         yaml_path = args.scenes or os.environ.get("COLLECT_SCENES", "") or _SCENES_CONFIG_PATH
         _run_init_mode(yaml_path, scene_indices=args.scene_idx)
     else:
-        run_headless(output_dir=args.output_dir)
+        run_headless(output_dir=args.output_dir, scene_indices=args.scene_idx)

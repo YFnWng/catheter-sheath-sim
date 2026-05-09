@@ -262,12 +262,22 @@ def _build(
     prefab.rigidBaseNode.addObject(  # type: ignore[attr-defined]
         "RestShapeSpringsForceField",
         name="BaseAttachment",
-        stiffness=1e5,
-        angularStiffness=1e5,
+        stiffness=1e10,
+        angularStiffness=1e10,
         external_points=0,
         points=0,
         template="Rigid3d",
     )
+    # Rod-only damping: damps strain velocities without affecting the base.
+    # Use this with low global Rayleigh damping so the base tracks commands
+    # crisply while the rod still has physical damping.
+    rod_damping = float(rod_cfg.get("strain_damping", 0.0))
+    if rod_damping > 0:
+        prefab.cosseratCoordinate.addObject(  # type: ignore[attr-defined]
+            "UniformVelocityDampingForceField",
+            name="StrainDamping",
+            dampingCoefficient=rod_damping,
+        )
 
     # Scale visual aids to ~10% of rod length for visibility
     _vis_scale = params.beam_geo_params.beam_length * 0.005

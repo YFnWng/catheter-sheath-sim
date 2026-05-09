@@ -224,15 +224,18 @@ class DataCollectorController(Sofa.Core.Controller):
         base_orientation = (
             rotation * self._base_home_orientation * self._prefab_rot_offset
         ).as_quat()
+        target_pos = (self._base_home_position + translation).tolist()
+        target_ori = base_orientation.tolist()
 
-        with self._base_mo.position.writeable() as pos:
-            pos[0][0:3] = (self._base_home_position + translation).tolist()
-            pos[0][3:7] = base_orientation.tolist()
+        # Only update rest_position (spring target), not position directly.
+        # The RestShapeSpringsForceField pulls the base toward the target,
+        # letting base motion propagate through rod dynamics instead of
+        # being applied as a rigid transform.
         if (hasattr(self._base_mo, "rest_position")
                 and len(self._base_mo.rest_position.value) > 0):
             with self._base_mo.rest_position.writeable() as rest:
-                rest[0][0:3] = (self._base_home_position + translation).tolist()
-                rest[0][3:7] = base_orientation.tolist()
+                rest[0][0:3] = target_pos
+                rest[0][3:7] = target_ori
 
         if self._cable_data is not None:
             self._cable_data.value = [cable_val * self._SOFA_CABLE_SCALE]

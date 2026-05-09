@@ -104,18 +104,27 @@ def _build_contact_force(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, li
 
 def _build_base_translation(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
     import pyqtgraph as pg
+    # Command curves use lighter/thinner pen (OpenGL ignores dash patterns)
+    _C_light = [(255, 120, 120), (120, 255, 120), (120, 120, 255)]
     p = _make_panel(win, "Base translation", "m", xlabel="t (s)")
     bt = [p.plot([], [], pen=pg.mkPen(_C[i], width=2), name=l)
           for i, l in enumerate("XYZ")]
-    return dict(bt=bt)
+    bt_rest = [p.plot([], [], pen=pg.mkPen(_C_light[i], width=1),
+                       name=f"{l} cmd")
+               for i, l in enumerate("XYZ")]
+    return dict(bt=bt, bt_rest=bt_rest)
 
 
 def _build_base_rotation(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
     import pyqtgraph as pg
+    _C_light = [(255, 120, 120), (120, 255, 120), (120, 120, 255)]
     p = _make_panel(win, "Base rotation", "deg", xlabel="t (s)")
     br = [p.plot([], [], pen=pg.mkPen(_C[i], width=2), name=l)
           for i, l in enumerate(["Roll", "Pitch", "Yaw"])]
-    return dict(br=br)
+    br_rest = [p.plot([], [], pen=pg.mkPen(_C_light[i], width=1),
+                       name=f"{l} cmd")
+               for i, l in enumerate(["Roll", "Pitch", "Yaw"])]
+    return dict(br=br, br_rest=br_rest)
 
 
 def _build_tendon_force(win, s_n, s_s, zeros_n, zeros_s, **kw) -> Dict[str, list]:
@@ -172,6 +181,8 @@ _TIME_SERIES_PANELS = {"base_translation", "base_rotation",
 _TS_CURVE_KEYS = {
     "base_pos": "bt",
     "base_rot": "br",
+    "base_rest_pos": "bt_rest",
+    "base_rest_rot": "br_rest",
     "cable_tensions": "tf",
     "total_contact": "tcf",
     "total_contact_norm": "tcf_norm",
