@@ -429,16 +429,12 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         generator = gen_cls(joint_lower, joint_upper, dt, **gen_kwargs)
 
         metadata = {
+            "schema_version": 1,
+            "scene_index": scene_index,
             "task": tag,
-            "config_path": _ROBOT_CONFIG_PATH,
-            "cable_mode": cable_mode,
-            "dt": dt,
-            "gravity": list(root.gravity.value),
-            "scene_objects": scene_objects,
-            "robot_type": type(robot).__name__,
         }
-        if initial_config:
-            metadata["initial_config"] = initial_config
+        # Legacy fields kept for backward compatibility with loader
+        metadata["scene_objects"] = scene_objects
 
         # Extract initial physical state + back-calculate insertion offset
         init_base_pose = None
@@ -666,6 +662,57 @@ def _run_one_scene(scene_dict, scene_idx, total_scenes, output_dir=""):
     return step, elapsed
 
 
+def _write_collection_meta(output_dir, gen_name, gen_cls, gen_kwargs, dt,
+                           cable_mode):
+    """Copy configs to output_dir and write collection_meta.json."""
+    import shutil
+    import json as _json
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Copy rod and scene configs into the data folder
+    scenes_path = os.environ.get("COLLECT_SCENES", "") or _SCENES_CONFIG_PATH
+    rod_dst = os.path.join(output_dir, os.path.basename(_ROBOT_CONFIG_PATH))
+    scene_dst = os.path.join(output_dir, os.path.basename(scenes_path))
+    if not os.path.exists(rod_dst):
+        shutil.copy2(_ROBOT_CONFIG_PATH, rod_dst)
+    if not os.path.exists(scene_dst):
+        shutil.copy2(scenes_path, scene_dst)
+
+    # Extract generator params from its __init__ signature defaults + kwargs
+    import inspect
+    sig = inspect.signature(gen_cls.__init__)
+    gen_params = {}
+    for name, param in sig.parameters.items():
+        if name in ("self", "joint_lower_limits", "joint_upper_limits", "dt"):
+            continue
+        if name in gen_kwargs:
+            gen_params[name] = gen_kwargs[name]
+        elif param.default is not inspect.Parameter.empty:
+            val = param.default
+            if isinstance(val, tuple):
+                val = list(val)
+            gen_params[name] = val
+
+    meta = {
+        "schema_version": 1,
+        "rod_config": os.path.basename(_ROBOT_CONFIG_PATH),
+        "scene_config": os.path.basename(scenes_path),
+        "generator": gen_name,
+        "generator_params": gen_params,
+        "simulation": {
+            "dt": dt,
+            "cable_mode": cable_mode,
+        },
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+    meta_path = os.path.join(output_dir, "collection_meta.json")
+    with open(meta_path, "w") as f:
+        _json.dump(meta, f, indent=2)
+    print(f"[collect_data] Wrote {meta_path}")
+
+
 def run_headless(output_dir="", scene_indices=None):
     """Run scenes from the scenes YAML config sequentially.
 
@@ -681,6 +728,25 @@ def run_headless(output_dir="", scene_indices=None):
         selected = list(enumerate(scenes))
     print(f"[collect_data] {len(selected)} scene(s) to collect "
           f"(of {len(scenes)} total)")
+
+    # Write collection-level metadata (configs + generator info)
+    data_dir = output_dir or os.getcwd()
+    gen_name = os.environ.get("COLLECT_GENERATOR", "sweep")
+    gen_cls = _GENERATORS.get(gen_name)
+    gen_kwargs = {}
+    duration = float(os.environ.get("COLLECT_DURATION", "0"))
+    if duration > 0 and gen_cls is not None:
+        import inspect
+        if "duration" in inspect.signature(gen_cls.__init__).parameters:
+            gen_kwargs["duration"] = duration
+
+    with open(_ROBOT_CONFIG_PATH) as f:
+        rod_cfg = yaml.safe_load(f)
+    cable_mode = rod_cfg.get("actuation", {}).get("cable_mode", "force")
+
+    if gen_cls is not None:
+        _write_collection_meta(data_dir, gen_name, gen_cls, gen_kwargs,
+                               dt=0.01, cable_mode=cable_mode)
 
     msg_handler = SofaMessageHandler(print_info=False)
     total_steps = 0
