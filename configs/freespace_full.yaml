@@ -1,0 +1,24 @@
+robot: catheter_ablation.yaml
+
+scenes:
+# Scene 0: tip force only, no control
+- objects: []
+  enable_tip_force: true
+  enable_control: false
+
+# Scene 1: all control, no tip force
+- objects: []
+  enable_tip_force: false
+  enable_control: true
+
+# Scene 2: tendon + rotation only, no insertion, no tip force
+# enable_control: [insertion, rotation, cable]
+- objects: []
+  enable_tip_force: false
+  enable_control: [false, true, true]
+
+# Scene 3: tendon + insertion only, no rotation, no tip force
+# enable_control: [insertion, rotation, cable]
+- objects: []
+  enable_tip_force: false
+  enable_control: [true, false, true]

@@ -144,12 +144,26 @@ def _load_scenes(scenes_path=None):
     """Load scenes list from *scenes_path* or ``COLLECT_SCENES`` env var.
 
     Falls back to ``_SCENES_CONFIG_PATH`` if neither is provided.
+    Also reads ``robot`` field to override the robot config path.
     """
+    global _ROBOT_CONFIG_PATH
     path = scenes_path or os.environ.get("COLLECT_SCENES", "") or _SCENES_CONFIG_PATH
     with open(path) as f:
-        raw = yaml.safe_load(f).get("scenes", [])
+        data = yaml.safe_load(f)
+    raw = data.get("scenes", [])
     if not raw:
         raise ValueError(f"No scenes found in {path}")
+
+    # Override robot config if specified in the scene yaml
+    robot_cfg = data.get("robot")
+    if robot_cfg:
+        # Resolve relative to the scene yaml's directory
+        scenes_dir = os.path.dirname(os.path.abspath(path))
+        robot_path = os.path.join(scenes_dir, robot_cfg)
+        if os.path.exists(robot_path):
+            _ROBOT_CONFIG_PATH = robot_path
+            print(f"  Robot config: {_ROBOT_CONFIG_PATH}")
+
     return [_normalize_scene(s) for s in raw]
 
 
@@ -323,6 +337,12 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
     initial_config = _get_initial_config(scene_dict)
     tag = _scene_tag(scene_objects)
 
+    # Per-scene toggles (default: enabled for backward compat)
+    enable_tip_force = scene_dict.get("enable_tip_force", True)
+    # enable_control: true/false (all joints), or list of bools per joint
+    # e.g. [false, true, true] = no insertion, yes rotation, yes cable
+    enable_control = scene_dict.get("enable_control", True)
+
     root.gravity = [0.0, 0.0, 0.0]
     root.dt = 0.01
 
@@ -427,6 +447,33 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             if "duration" in inspect.signature(gen_cls.__init__).parameters:
                 gen_kwargs["duration"] = duration
         generator = gen_cls(joint_lower, joint_upper, dt, **gen_kwargs)
+        if isinstance(enable_control, list):
+            # Per-joint mask: e.g. [false, true, true]
+            _inner = generator
+            _mask = np.array(enable_control, dtype=bool)
+            class _MaskedGenerator:
+                name = _inner.name
+                joint_lower = _inner.joint_lower
+                joint_upper = _inner.joint_upper
+                def step(self, t):
+                    cmd = _inner.step(t)
+                    cmd[~_mask] = 0.0
+                    return cmd
+                def is_done(self, t):
+                    return _inner.is_done(t)
+            generator = _MaskedGenerator()
+        elif not enable_control:
+            # All joints disabled
+            _inner = generator
+            class _ZeroGenerator:
+                name = "zero"
+                joint_lower = _inner.joint_lower
+                joint_upper = _inner.joint_upper
+                def step(self, t):
+                    return np.zeros_like(_inner.joint_lower)
+                def is_done(self, t):
+                    return _inner.is_done(t)
+            generator = _ZeroGenerator()
 
         metadata = {
             "schema_version": 1,
@@ -457,6 +504,8 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
 
         tip_force_cfg = cfg.get("tip_force", {})
         tip_force_max = float(tip_force_cfg.get("max_force", 0.5))
+        if not enable_tip_force:
+            tip_force_max = 0.0
 
         controller = DataCollectorController(
             name="DataCollectorController",
