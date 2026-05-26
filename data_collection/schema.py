@@ -79,14 +79,30 @@ def write_hdf5(
     path: str,
     record: TrajectoryRecord,
     metadata: Optional[Dict] = None,
+    extra: Optional[Dict] = None,
 ) -> None:
-    """Write a finalised trajectory record to an HDF5 file."""
+    """Write a finalised trajectory record to an HDF5 file.
+
+    Parameters
+    ----------
+    extra : dict of str -> (list or np.ndarray), optional
+        Additional datasets to write (e.g., control-specific data).
+        Lists are converted to numpy arrays automatically.
+        Empty lists are skipped.
+    """
     import h5py
 
     arrays = record.finalise()
     with h5py.File(path, "w") as f:
         for name, arr in arrays.items():
             f.create_dataset(name, data=arr, compression="gzip", compression_opts=4)
+        if extra:
+            for name, vals in extra.items():
+                if vals is None or (hasattr(vals, '__len__') and len(vals) == 0):
+                    continue
+                arr = np.asarray(vals, dtype=np.float64)
+                f.create_dataset(name, data=arr, compression="gzip",
+                                 compression_opts=4)
         if metadata:
             f.attrs["metadata"] = json.dumps(metadata)
 
