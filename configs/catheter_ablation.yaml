@@ -55,3 +55,17 @@ actuation:
 # Set max_force to 0 to disable.
 tip_force:
   max_force: 0.5             # N (peak magnitude per axis)
+
+# Sensor configuration — shared by state estimation and feedback control.
+# frame_indices refer to SOFA frame indices (0..n_frames).
+sensors:
+  em_coils:
+    frame_indices: [32]          # 6-DOF (position + orientation)
+    position_std: 1.0e-4       # m
+    orientation_std: 1.0       # degrees
+  mri_coils:
+    frame_indices: []  # 3-DOF (position only)
+    position_std: 1.0e-6       # m
+  fbg:
+    section_indices: []        # strain sensors
+    strain_std: 1.0            # rad/m

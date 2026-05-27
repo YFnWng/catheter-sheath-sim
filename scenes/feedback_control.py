@@ -81,179 +81,6 @@ def _normalize_scene(entry):
     raise ValueError(f"Invalid scene entry: {entry!r}")
 
 
-# ── Controller / Observer factory ────────────────────────────────────
-
-def _build_reference(ref_cfg: dict):
-    """Build a ReferenceTrajectory from YAML config."""
-    from control.reference import ReferenceTrajectory
-
-    ref_type = ref_cfg.get("type", "fixed")
-    if ref_type == "fixed":
-        target = np.array(ref_cfg["target"], dtype=np.float64)
-        return ReferenceTrajectory.fixed(target)
-    elif ref_type == "waypoints":
-        waypoints = [(w["t"], np.array(w["target"], dtype=np.float64))
-                     for w in ref_cfg["waypoints"]]
-        return ReferenceTrajectory.from_waypoints(waypoints)
-    elif ref_type == "file":
-        return ReferenceTrajectory.from_file(ref_cfg["path"])
-    else:
-        raise ValueError(f"Unknown reference type: {ref_type}")
-
-
-def _build_controller(ctrl_cfg: dict, robot, dynamics_model=None,
-                       observation_model=None):
-    """Build a controller from YAML config."""
-    from control.open_loop import OpenLoopController
-    from control.pid import PIDController
-    from control.mppi import MPPIController
-    from control.adapj import AdapJController
-
-    ctrl_type = ctrl_cfg.get("type", "pid")
-    params = ctrl_cfg.get("params", {})
-
-    joint_lower = np.array(robot.joint_lower_limits, dtype=float)
-    joint_upper = np.array(robot.joint_upper_limits, dtype=float)
-    n_joints = len(joint_lower)
-    dt = params.get("dt", 0.01)
-
-    common = dict(n_joints=n_joints, joint_lower=joint_lower,
-                  joint_upper=joint_upper, dt=dt)
-
-    if ctrl_type == "open_loop":
-        from control.reference import ReferenceTrajectory
-        traj = ReferenceTrajectory.from_file(params["trajectory_path"])
-        return OpenLoopController(trajectory=traj, **common)
-
-    elif ctrl_type == "pid":
-        Kp = np.array(params.get("Kp", [1.0, 0.5, 0.2]), dtype=float)
-        Ki = np.array(params.get("Ki", [0.0, 0.0, 0.0]), dtype=float)
-        Kd = np.array(params.get("Kd", [0.0, 0.0, 0.0]), dtype=float)
-        anti_windup = float(params.get("anti_windup", 100.0))
-        return PIDController(Kp=Kp, Ki=Ki, Kd=Kd,
-                             anti_windup=anti_windup, **common)
-
-    elif ctrl_type == "mppi":
-        if dynamics_model is None:
-            raise ValueError("MPPI requires a dynamics model "
-                             "(configure observer section)")
-        horizon = int(params.get("horizon", 10))
-        n_samples = int(params.get("n_samples", 100))
-        temperature = float(params.get("temperature", 1.0))
-        noise_std = params.get("noise_std")
-        if noise_std is not None:
-            noise_std = np.array(noise_std, dtype=float)
-        terminal_weight = float(params.get("terminal_weight", 10.0))
-        tip_indices = slice(6, 9)
-        return MPPIController(
-            dynamics_model=dynamics_model,
-            observation_model=observation_model,
-            tip_indices=tip_indices,
-            horizon=horizon, n_samples=n_samples,
-            temperature=temperature, noise_std=noise_std,
-            terminal_weight=terminal_weight, **common)
-
-    elif ctrl_type == "adapj":
-        n_state = int(params.get("n_state", 3))
-        max_delta = float(params.get("max_delta", 0.1))
-        rho = float(params.get("rho", 1.0))
-        angular_indices = params.get("angular_indices", [1])  # rotation joint
-        return AdapJController(n_state=n_state, max_delta=max_delta,
-                               rho=rho, angular_indices=angular_indices,
-                               **common)
-
-    else:
-        raise ValueError(f"Unknown controller type: {ctrl_type}")
-
-
-def _build_observer(obs_cfg: dict, dt: float):
-    """Build an observer from YAML config. Returns (observer, dynamics, observation)."""
-    obs_type = obs_cfg.get("type", "none")
-    if obs_type == "none":
-        return None, None, None
-
-    import json
-    model_dir = obs_cfg.get("model_dir", "")
-    data_stem = obs_cfg.get("data_stem", "")
-
-    # Load metadata
-    meta_path = os.path.join(model_dir, f"{data_stem}_meta.json")
-    with open(meta_path) as f:
-        meta = json.load(f)
-
-    d = meta.get("encoder", {}).get("n_components", 8)
-
-    # Load dynamics
-    from state_estimation.training.networks.latent_models import (
-        LatentDynamics, load_observation,
-    )
-    dyn_name = obs_cfg.get("dynamics_model",
-                           f"mlp_{data_stem}.npz")
-    dyn_path = os.path.join(model_dir, "dynamics", dyn_name)
-    dynamics = LatentDynamics.load(dyn_path, meta, dt)
-
-    # Load observation model
-    obs_model_type = meta.get("observation", {}).get("type", "mlp")
-    obs_name = obs_cfg.get("observation_model",
-                           f"mlp_{data_stem}.npz")
-    obs_path = os.path.join(model_dir, "observation", obs_name)
-
-    if obs_model_type == "physics":
-        from state_estimation.training.networks.encoder import load_encoder
-        enc_path = os.path.join(model_dir, "encoder",
-                                f"pca_{data_stem}.npz")
-        encoder = load_encoder(enc_path)
-        # Physics observation needs additional FK params
-        observation = load_observation(
-            "physics", obs_path, meta, d, encoder=encoder,
-            ds=meta.get("observation", {}).get("ds"),
-            X_ref=None)  # TODO: load X_ref from meta
-    else:
-        observation = load_observation("mlp", obs_path, meta, d)
-
-    # Build observer
-    proc_noise = float(obs_cfg.get("process_noise", 0.01))
-    meas_noise = float(obs_cfg.get("measurement_noise", 0.1))
-    init_cov = float(obs_cfg.get("initial_cov", 1.0))
-
-    state_dim = dynamics.state_dim
-    obs_dim = observation.obs_dim
-
-    Q = np.eye(state_dim, dtype=np.float64) * proc_noise
-    R = np.eye(obs_dim, dtype=np.float64) * meas_noise
-
-    if obs_type == "ekf":
-        from state_estimation.training.networks.observer import EKFObserver
-        observer = EKFObserver(dynamics, observation, Q, R,
-                               initial_cov=init_cov)
-    elif obs_type == "ukf":
-        from state_estimation.training.networks.observer import UKFObserver
-        alpha = float(obs_cfg.get("alpha", 1e-3))
-        beta = float(obs_cfg.get("beta", 2.0))
-        kappa = float(obs_cfg.get("kappa", 0.0))
-        observer = UKFObserver(dynamics, observation, Q, R,
-                               initial_cov=init_cov,
-                               alpha=alpha, beta=beta, kappa=kappa)
-    elif obs_type == "gru":
-        from state_estimation.training.networks.observer import LearnedObserver
-        import torch
-        obs_meta = meta.get("observer", {})
-        gru_path = os.path.join(model_dir, "observer",
-                                f"gru_{data_stem}.npz")
-        gru_data = np.load(gru_path)
-        obs_input_dim = obs_meta.get("input_dim", 21)
-        hidden_dim = obs_meta.get("hidden_dim", 16)
-        observer = LearnedObserver(obs_input_dim, hidden_dim)
-        state_dict = {k: torch.tensor(gru_data[k])
-                      for k in gru_data.files
-                      if k not in ("input_std", "output_std")}
-        observer.load_state_dict(state_dict)
-        observer.eval()
-    else:
-        raise ValueError(f"Unknown observer type: {obs_type}")
-
-    return observer, dynamics, observation
-
 
 # ── Scene builder ────────────────────────────────────────────────────
 
@@ -321,22 +148,39 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         cable_mode=cable_mode,
     )
 
-    # Build observer + models
+    # Build sensor suite from robot config
+    sensor_suite = None
+    sensor_cfg = rod_cfg.get("sensors", {})
+    if sensor_cfg:
+        from state_estimation.sensors.base import SensorSuite
+        n_nodes = int(rod_cfg.get("rod", {}).get("n_frames", 32)) + 1
+        sensor_suite = SensorSuite.from_yaml(rod_cfg, n_nodes)
+
+    # Control mode
+    ctrl_space_cfg = config.get("control", {})
+    control_mode = ctrl_space_cfg.get("mode", "position")
+    control_sensor = ctrl_space_cfg.get("sensor", "mri_coils")
+    control_sensor_index = int(ctrl_space_cfg.get("sensor_index", -1))
+
+    # Build world model (observer + dynamics + observation)
+    from state_estimation.training.networks.world_model import build_model
     obs_cfg = config.get("observer", {"type": "none"})
-    observer, dynamics_model, observation_model = _build_observer(
-        obs_cfg, dt=sim_dt)
+    world_model = build_model(obs_cfg, dt=sim_dt, sensor_config=sensor_cfg)
 
     # Build reference
+    from control.factory import build_reference, build_controller
     ref_cfg = config.get("reference", {"type": "fixed",
                                         "target": [0, 0, 0.12]})
-    reference = _build_reference(ref_cfg)
+    reference = build_reference(ref_cfg)
 
     # Build controller
     ctrl_cfg = config.get("controller", {"type": "pid"})
-    controller = _build_controller(
-        ctrl_cfg, robot,
-        dynamics_model=dynamics_model,
-        observation_model=observation_model)
+    controller = build_controller(
+        ctrl_cfg,
+        joint_lower=np.array(robot.joint_lower_limits, dtype=float),
+        joint_upper=np.array(robot.joint_upper_limits, dtype=float),
+        world_model=world_model,
+        control_mode=control_mode)
 
     # Output path
     out_cfg = config.get("output", {})
@@ -393,10 +237,13 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
     fb_controller = FeedbackController(
         name="FeedbackController",
         controller=controller,
-        observer=observer,
-        observation_model=observation_model,
+        world_model=world_model,
+        sensor_suite=sensor_suite,
         reader=reader,
         reference=reference,
+        control_mode=control_mode,
+        control_sensor=control_sensor,
+        control_sensor_index=control_sensor_index,
         base_mechanical_object=robot.base_mo,
         cable_constraint=robot.cable_constraint,
         direction=robot.insertion_direction,
@@ -415,15 +262,30 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         babble_steps=babble_steps,
         babble_amplitude=babble_amplitude,
         duration=duration,
+        sensor_config=sensor_cfg,
     )
     root.addObject(fb_controller)
 
-    # ── Target visualization (GUI only) ──────────────────────────────
+    # ── Target + sensor visualization (GUI only) ───────────────────
     if not headless:
         ref_type = ref_cfg.get("type", "fixed")
         if ref_type == "fixed":
             target = np.array(ref_cfg["target"], dtype=float)
             _add_target_marker(root, target)
+
+        # Sensor markers
+        if sensor_suite is not None and sensor_suite.n_position_sensors > 0:
+            from utils.sofa_writer import SofaWriter
+            n_sens = sensor_suite.n_position_sensors
+            sensor_node = root.addChild("SensorMarkers")
+            sensor_mo = sensor_node.addObject(
+                "MechanicalObject", name="SensorMO", template="Vec3d",
+                position=[[0, 0, 0]] * n_sens,
+                showObject=True, showObjectScale=5.0,
+                showColor=[1.0, 1.0, 0.2, 1.0],
+            )
+            fb_controller._sensor_writer = SofaWriter(
+                shape_mo=None, sensor_mo=sensor_mo)
 
         # Diagnostic plotter
         from utils.plotter import DiagnosticPlotter

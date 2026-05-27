@@ -7,6 +7,11 @@ scenes:
   #   base_pose: [0, 0, 0, 0, 0, 0, 1]
   #   strain_coords: [...]
 
+control:
+  mode: position                 # position | pose
+  sensor: em_coils              # which sensor type to control (mri_coils or em_coils)
+  sensor_index: -1               # index into sensor's frame_indices array (-1 = last)
+
 observer:
   type: none                 # none | ekf | ukf | gru
   # model_dir: ../state_estimation/training/learned_libraries/latent

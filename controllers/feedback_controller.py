@@ -79,10 +79,20 @@ class FeedbackController(Sofa.Core.Controller):
         super().__init__(*args, **kwargs)
 
         self._controller = kwargs.pop("controller")
-        self._observer = kwargs.pop("observer", None)
-        self._observation_model = kwargs.pop("observation_model", None)
+        self._world_model = kwargs.pop("world_model", None)
+        self._observer = self._world_model.observer if self._world_model else None
+        self._observation_model = self._world_model.observation if self._world_model else None
+        self._sensor_suite = kwargs.pop("sensor_suite", None)
         self._reader = kwargs.pop("reader")
         self._reference = kwargs.pop("reference")
+
+        # Control mode: what quantity to control
+        # mode: 'position' (3D) or 'pose' (7D quat)
+        # sensor: which sensor type ('mri_coils' or 'em_coils')
+        # sensor_index: index into that sensor's frame_indices (-1 = last)
+        self._control_mode = kwargs.pop("control_mode", "position")
+        self._control_sensor = kwargs.pop("control_sensor", "mri_coils")
+        self._control_sensor_idx = kwargs.pop("control_sensor_index", -1)
 
         self._base_mo = kwargs.pop("base_mechanical_object")
         self._cable_constraint = kwargs.pop("cable_constraint", None)
@@ -122,6 +132,9 @@ class FeedbackController(Sofa.Core.Controller):
         if self._cable_constraint is not None:
             self._cable_data = self._cable_constraint.findData("value")
 
+        # Sensor config (for resolving frame indices in _extract_controlled)
+        self._sensor_cfg = kwargs.pop("sensor_config", {})
+
         # AdapJ babbling config
         self._babble_steps = int(kwargs.pop("babble_steps", 0))
         babble_amp = kwargs.pop("babble_amplitude", None)
@@ -144,7 +157,9 @@ class FeedbackController(Sofa.Core.Controller):
         self._last_update_time = 0.0
         self._in_control_phase = False
         self._last_sofa_gt = None  # cached from previous onAnimateEnd
-        self._last_tip_xyz = None
+        self._last_controlled = None  # controlled quantity from last onAnimateEnd
+        self._last_readings = None    # sensor readings from last onAnimateEnd
+        self._sensor_writer = None    # set by scene builder for GUI visualization
 
         # Babbling state
         self._babbling = self._babble_steps > 0
@@ -182,12 +197,14 @@ class FeedbackController(Sofa.Core.Controller):
         if self._step <= self._warmup_steps:
             return
 
-        # Use tip xyz cached from previous onAnimateEnd
-        tip_xyz = self._last_tip_xyz
+        # Use controlled quantity cached from previous onAnimateEnd
+        controlled = self._last_controlled
+        if controlled is None:
+            return  # first control step; onAnimateEnd hasn't run yet
 
         # --- Babbling phase (AdapJ) ---
         if self._babbling:
-            self._run_babble_step(tip_xyz, t)
+            self._run_babble_step(controlled, t)
             return
 
         # --- Control phase ---
@@ -202,9 +219,9 @@ class FeedbackController(Sofa.Core.Controller):
         # Get reference at current time
         ref = self._reference.at(t)
 
-        # Compute control using raw measurement
+        # Compute control using raw sensor measurement
         t0 = _time.perf_counter()
-        self._joint_cmd = self._controller.compute(tip_xyz, ref, t)
+        self._joint_cmd = self._controller.compute(controlled, ref, t)
         self._last_compute_time = _time.perf_counter() - t0
 
         self._apply_joint_commands(self._joint_cmd)
@@ -215,23 +232,44 @@ class FeedbackController(Sofa.Core.Controller):
 
         sofa_gt = self._reader.read()
         self._last_sofa_gt = sofa_gt
-        self._last_tip_xyz = sofa_gt.frame_poses[-1][:3].copy()
 
         dt = float(self._base_mo.getContext().dt.value)
         t = self._step * dt
 
+        # Sensor readings (if sensor suite configured)
+        if self._sensor_suite is not None:
+            self._last_readings = self._sensor_suite.observe(sofa_gt, t, dt)
+        else:
+            self._last_readings = None
+
+        # Extract controlled quantity from sensor readings or raw SOFA state
+        self._last_controlled = self._extract_controlled(sofa_gt)
+
         # Observer update
         if self._observer is not None and self._step > self._warmup_steps:
-            y = self._build_observation(sofa_gt)
-            self._observer.step(self._joint_cmd, y)
+            if self._last_readings is not None:
+                # Pass sensor readings dict to observer
+                self._observer.step(self._joint_cmd, self._last_readings)
+            else:
+                y = self._build_observation(sofa_gt)
+                self._observer.step(self._joint_cmd, y)
 
         # AdapJ online update
         self._last_update_time = 0.0
         if hasattr(self._controller, "update") and not self._babbling:
             if self._step > self._warmup_steps:
                 t0 = _time.perf_counter()
-                self._controller.update(self._last_tip_xyz, self._joint_cmd)
+                self._controller.update(self._last_controlled, self._joint_cmd)
                 self._last_update_time = _time.perf_counter() - t0
+
+        # Update sensor display (if GUI mode with visualization)
+        if (hasattr(self, '_sensor_writer') and self._sensor_writer is not None
+                and self._last_readings is not None):
+            sensor_pts = []
+            for p in self._last_readings.positions.values():
+                sensor_pts.append(np.asarray(p[:3], dtype=float))
+            sensor_arr = np.array(sensor_pts, dtype=float) if sensor_pts else None
+            self._sensor_writer.update_positions(None, sensor_arr)
 
         # --- Recording ---
         if not self._record_enabled:
@@ -262,12 +300,12 @@ class FeedbackController(Sofa.Core.Controller):
     # Babbling (AdapJ initialization)
     # ------------------------------------------------------------------
 
-    def _run_babble_step(self, tip_xyz: np.ndarray, t: float) -> None:
+    def _run_babble_step(self, controlled: np.ndarray, t: float) -> None:
         """Execute one motor babbling step for AdapJ initialization."""
         self._babble_count += 1
 
-        # Record state
-        self._babble_states.append(tip_xyz.copy())
+        # Record controlled quantity (position or pose)
+        self._babble_states.append(controlled.copy())
 
         # Random actuation
         if self._babble_amplitude is not None:
@@ -320,6 +358,53 @@ class FeedbackController(Sofa.Core.Controller):
             eta = np.zeros(6)
 
         return np.concatenate([xi, eta]).astype(np.float32)
+
+    def _extract_controlled(self, sofa_gt) -> np.ndarray:
+        """Extract controlled quantity from sensor readings or raw SOFA state.
+
+        Uses self._control_mode ('position' or 'pose'),
+        self._control_sensor ('mri_coils' or 'em_coils'),
+        self._control_sensor_idx (index into sensor's frame_indices array).
+        """
+        readings = self._last_readings
+
+        if readings is not None:
+            # Determine which frame index to use from sensor config
+            sensor_block = self._sensor_cfg.get(self._control_sensor, {})
+            frame_list = sensor_block.get("frame_indices", [])
+            if not frame_list:
+                raise ValueError(
+                    f"Sensor '{self._control_sensor}' has no frame_indices "
+                    f"configured but sensor_suite is active")
+
+            idx = self._control_sensor_idx
+            if idx < 0:
+                idx = len(frame_list) + idx
+            frame_idx = frame_list[idx]
+
+            if self._control_mode == "position":
+                pos = readings.positions.get(frame_idx)
+                if pos is None:
+                    raise ValueError(
+                        f"No position reading at frame {frame_idx} from "
+                        f"sensor '{self._control_sensor}'")
+                return pos[:3].copy()
+            elif self._control_mode == "pose":
+                pose = readings.poses.get(frame_idx)
+                if pose is None:
+                    raise ValueError(
+                        f"No pose reading at frame {frame_idx} from "
+                        f"sensor '{self._control_sensor}'")
+                return pose.copy()
+            else:
+                raise ValueError(
+                    f"Unknown control mode: '{self._control_mode}'")
+
+        # No sensor suite: fall back to tip position/pose from raw SOFA
+        tip_frame = sofa_gt.frame_poses[-1]
+        if self._control_mode == "pose":
+            return tip_frame.copy()
+        return tip_frame[:3].copy()
 
     # ------------------------------------------------------------------
     # Joint command application (same as DataCollectorController)
