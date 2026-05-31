@@ -12,18 +12,19 @@ control:
   sensor: em_coils              # which sensor type to control (mri_coils or em_coils)
   sensor_index: -1               # index into sensor's frame_indices array (-1 = last)
 
-observer:
-  type: none                 # none | ekf | ukf | gru
-  # model_dir: ../state_estimation/training/learned_libraries/latent
-  # data_stem: full_control_tip
-  # dynamics_model: mlp_full_control_tip.npz
-  # observation_model: mlp_full_control_tip.npz
-  # process_noise: 0.01
-  # measurement_noise: 0.1
-  # initial_cov: 1.0
+model:
+  observer: ukf              # none | ekf | ukf | gru
+  model_dir: state_estimation/training/learned_libraries/latent
+  data_stem: full_control_tip
+  dynamics_model: mlp_full_control_tip.npz
+  # Q and R are loaded from model npz files if available.
+  # Fallback scalars when not saved in files:
+  process_noise: 0.01
+  measurement_noise: 0.1
+  initial_cov: 1.0
 
 controller:
-  type: adapj                # pid | open_loop | mppi | adapj
+  type: mppi                # pid | open_loop | mppi | adapj
   params:
     # --- PID params ---
     # Kp: [1.0, 0.5, 0.2]
@@ -32,19 +33,19 @@ controller:
     # anti_windup: 100.0
 
     # --- MPPI params (requires observer with dynamics model) ---
-    # horizon: 10
-    # n_samples: 100
-    # temperature: 1.0
-    # noise_std: [5.0, 10.0, 1.0]
-    # terminal_weight: 10.0
+    horizon: 10
+    n_samples: 100
+    temperature: 1.0
+    noise_std: [5.0, 10.0, 1.0]
+    terminal_weight: 10.0
 
     # --- AdapJ params ---
-    n_state: 3
-    max_delta: 0.1
-    rho: 1.0
-    angular_indices: [1]                  # joints with angular values (deg), encoded as cos/sin internally
-    babble_steps: 100
-    babble_amplitude: [10.0, 30.0, 5.0]  # [insertion_mm, rotation_deg, cable]
+    # n_state: 3
+    # max_delta: 0.1
+    # rho: 1.0
+    # angular_indices: [1]                  # joints with angular values (deg), encoded as cos/sin internally
+    # babble_steps: 100
+    # babble_amplitude: [10.0, 30.0, 5.0]  # [insertion_mm, rotation_deg, cable]
 
 reference:
   type: fixed                # fixed | waypoints | file
@@ -65,4 +66,4 @@ output:
 simulation:
   duration: 30.0
   dt: 0.01
-  control_rate: 1            # run controller every N sim steps
+  control_rate: 10            # run controller every N sim steps

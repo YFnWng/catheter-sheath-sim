@@ -148,13 +148,14 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         cable_mode=cable_mode,
     )
 
-    # Build sensor suite from robot config
+    # Build robot interface and sensor suite
+    from state_estimation.training.robot_interface import RobotInterface
+    robot_iface = RobotInterface.from_yaml(robot_config_path)
     sensor_suite = None
-    sensor_cfg = rod_cfg.get("sensors", {})
+    sensor_cfg = robot_iface.sensor_config
     if sensor_cfg:
-        from state_estimation.sensors.base import SensorSuite
         n_nodes = int(rod_cfg.get("rod", {}).get("n_frames", 32)) + 1
-        sensor_suite = SensorSuite.from_yaml(rod_cfg, n_nodes)
+        sensor_suite = robot_iface.build_sensor_suite(n_nodes)
 
     # Control mode
     ctrl_space_cfg = config.get("control", {})
@@ -162,10 +163,23 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
     control_sensor = ctrl_space_cfg.get("sensor", "mri_coils")
     control_sensor_index = int(ctrl_space_cfg.get("sensor_index", -1))
 
+    # Prevent BLAS threading conflicts between SOFA and PyTorch/MKL
+    import torch
+    torch.set_num_threads(1)
+
     # Build world model (observer + dynamics + observation)
     from state_estimation.training.networks.world_model import build_model
-    obs_cfg = config.get("observer", {"type": "none"})
-    world_model = build_model(obs_cfg, dt=sim_dt, sensor_config=sensor_cfg)
+    model_cfg = config.get("model", config.get("observer", {"observer": "none"}))
+    # Resolve model_dir relative to workspace root, not CWD
+    if "model_dir" in model_cfg and not os.path.isabs(model_cfg["model_dir"]):
+        model_cfg = dict(model_cfg)
+        model_cfg["model_dir"] = os.path.normpath(
+            os.path.join(_WORKSPACE, model_cfg["model_dir"]))
+    world_model = build_model(model_cfg, dt=sim_dt, robot=robot_iface)
+    # Reset observer with valid initial base state (zero insertion, zero rotation)
+    if world_model.has_observer:
+        init_base = robot_iface.encode_base_state(np.zeros(robot_iface.base_state_raw_dim))
+        world_model.reset(base_state=init_base)
 
     # Build reference
     from control.factory import build_reference, build_controller
@@ -177,10 +191,11 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
     ctrl_cfg = config.get("controller", {"type": "pid"})
     controller = build_controller(
         ctrl_cfg,
-        joint_lower=np.array(robot.joint_lower_limits, dtype=float),
-        joint_upper=np.array(robot.joint_upper_limits, dtype=float),
         world_model=world_model,
-        control_mode=control_mode)
+        control_mode=control_mode,
+        control_sensor=control_sensor,
+        control_sensor_index=control_sensor_index,
+        robot=robot_iface)
 
     # Output path
     out_cfg = config.get("output", {})
@@ -239,6 +254,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         controller=controller,
         world_model=world_model,
         sensor_suite=sensor_suite,
+        robot_interface=robot_iface,
         reader=reader,
         reference=reference,
         control_mode=control_mode,

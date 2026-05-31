@@ -83,6 +83,7 @@ class FeedbackController(Sofa.Core.Controller):
         self._observer = self._world_model.observer if self._world_model else None
         self._observation_model = self._world_model.observation if self._world_model else None
         self._sensor_suite = kwargs.pop("sensor_suite", None)
+        self._robot_iface = kwargs.pop("robot_interface", None)
         self._reader = kwargs.pop("reader")
         self._reference = kwargs.pop("reference")
 
@@ -167,6 +168,14 @@ class FeedbackController(Sofa.Core.Controller):
         self._babble_actuations = []
         self._babble_count = 0
 
+    def _encode_cmd_for_model(self, raw_cmd: np.ndarray) -> np.ndarray:
+        """Encode raw joint command for the dynamics/observer model.
+
+        Raw: [insertion_m, rotation_deg, cable_N]
+        Encoded: [base_enc, tendon] in robot order (cos/sin for angular joints)
+        """
+        return self._robot_iface.encode_command(raw_cmd)
+
     # ------------------------------------------------------------------
     # SOFA callbacks
     # ------------------------------------------------------------------
@@ -219,9 +228,19 @@ class FeedbackController(Sofa.Core.Controller):
         # Get reference at current time
         ref = self._reference.at(t)
 
-        # Compute control using raw sensor measurement
+        # Model-based controllers need the full latent state from the observer;
+        # model-free controllers operate on raw sensor measurements.
+        if self._controller.needs_latent_state and self._observer is not None:
+            ctrl_state = self._observer.state.copy()
+            if self._step <= self._warmup_steps + 5:
+                print(f"  [MPPI diag] step={self._step} "
+                      f"observer_state shape={ctrl_state.shape} "
+                      f"values={ctrl_state[:5]}... "
+                      f"dynamics.state_dim={self._world_model.dynamics.state_dim}")
+        else:
+            ctrl_state = controlled
         t0 = _time.perf_counter()
-        self._joint_cmd = self._controller.compute(controlled, ref, t)
+        self._joint_cmd = self._controller.compute(ctrl_state, ref, t)
         self._last_compute_time = _time.perf_counter() - t0
 
         self._apply_joint_commands(self._joint_cmd)
@@ -247,12 +266,13 @@ class FeedbackController(Sofa.Core.Controller):
 
         # Observer update
         if self._observer is not None and self._step > self._warmup_steps:
+            u_enc = self._encode_cmd_for_model(self._joint_cmd)
             if self._last_readings is not None:
                 # Pass sensor readings dict to observer
-                self._observer.step(self._joint_cmd, self._last_readings)
+                self._observer.step(u_enc, self._last_readings)
             else:
                 y = self._build_observation(sofa_gt)
-                self._observer.step(self._joint_cmd, y)
+                self._observer.step(u_enc, y)
 
         # AdapJ online update
         self._last_update_time = 0.0
@@ -345,11 +365,7 @@ class FeedbackController(Sofa.Core.Controller):
 
         tip_pose = sofa_gt.frame_poses[-1]
         T_tip = pose_from_vec7(tip_pose)
-        if hasattr(self, "_X_ref"):
-            T_rel = self._X_ref.between(T_tip)
-        else:
-            T_rel = T_tip
-        xi = SE3_to_R9(T_rel)
+        xi = SE3_to_R9(T_tip)
 
         if sofa_gt.frame_velocity is not None and len(sofa_gt.frame_velocity) > 0:
             tip_vel_world = sofa_gt.frame_velocity[-1]
