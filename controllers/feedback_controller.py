@@ -161,6 +161,7 @@ class FeedbackController(Sofa.Core.Controller):
         self._last_controlled = None  # controlled quantity from last onAnimateEnd
         self._last_readings = None    # sensor readings from last onAnimateEnd
         self._sensor_writer = None    # set by scene builder for GUI visualization
+        self._last_tracking_error = None  # cached for PlotController to read
 
         # Babbling state
         self._babbling = self._babble_steps > 0
@@ -211,6 +212,10 @@ class FeedbackController(Sofa.Core.Controller):
         if controlled is None:
             return  # first control step; onAnimateEnd hasn't run yet
 
+        # Tracking error — updated every sim step for plotting
+        ref = self._reference.at(t)
+        self._last_tracking_error = controlled - ref
+
         # --- Babbling phase (AdapJ) ---
         if self._babbling:
             self._run_babble_step(controlled, t)
@@ -225,18 +230,10 @@ class FeedbackController(Sofa.Core.Controller):
 
         self._in_control_phase = True
 
-        # Get reference at current time
-        ref = self._reference.at(t)
-
         # Model-based controllers need the full latent state from the observer;
         # model-free controllers operate on raw sensor measurements.
         if self._controller.needs_latent_state and self._observer is not None:
             ctrl_state = self._observer.state.copy()
-            if self._step <= self._warmup_steps + 5:
-                print(f"  [MPPI diag] step={self._step} "
-                      f"observer_state shape={ctrl_state.shape} "
-                      f"values={ctrl_state[:5]}... "
-                      f"dynamics.state_dim={self._world_model.dynamics.state_dim}")
         else:
             ctrl_state = controlled
         t0 = _time.perf_counter()

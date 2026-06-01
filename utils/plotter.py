@@ -158,6 +158,25 @@ def _build_tip_load(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
     return dict(tl=tl, tl_norm=[tl_norm])
 
 
+def _build_tracking_error(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
+    import pyqtgraph as pg
+    p = _make_panel(win, "Tracking error", "m", xlabel="t (s)")
+    p.addLine(y=0, pen=pg.mkPen("k", width=0.5))
+    te = [p.plot([], [], pen=pg.mkPen(_C[i], width=2), name=l)
+          for i, l in enumerate("XYZ")]
+    return dict(te=te)
+
+
+def _build_command(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
+    import pyqtgraph as pg
+    _CMD_C = [(200, 50, 50), (50, 50, 200), (50, 150, 50)]
+    p = _make_panel(win, "Joint command", "", xlabel="t (s)")
+    p.addLine(y=0, pen=pg.mkPen("k", width=0.5))
+    cmd = [p.plot([], [], pen=pg.mkPen(_CMD_C[i], width=2), name=l)
+           for i, l in enumerate(["ins (m)", "rot (deg)", "cable (N)"])]
+    return dict(cmd=cmd)
+
+
 PANEL_BUILDERS = {
     # Spatial panels
     "position": _build_position,
@@ -170,12 +189,14 @@ PANEL_BUILDERS = {
     "tendon_force": _build_tendon_force,
     "total_contact_force": _build_total_contact_force,
     "tip_load": _build_tip_load,
+    "tracking_error": _build_tracking_error,
+    "command": _build_command,
 }
 
 # Panels whose curves use rolling time buffers instead of fixed arc-length
 _TIME_SERIES_PANELS = {"base_translation", "base_rotation",
                        "tendon_force", "total_contact_force",
-                       "tip_load"}
+                       "tip_load", "tracking_error", "command"}
 
 # Data key -> curve key mapping for time-series panels
 _TS_CURVE_KEYS = {
@@ -187,6 +208,8 @@ _TS_CURVE_KEYS = {
     "total_contact": "tcf",
     "total_contact_norm": "tcf_norm",
     "tip_load": "tl",
+    "tracking_error": "te",
+    "command": "cmd",
 }
 
 _PANELS_PER_ROW = 2

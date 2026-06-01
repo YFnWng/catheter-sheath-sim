@@ -176,10 +176,14 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         model_cfg["model_dir"] = os.path.normpath(
             os.path.join(_WORKSPACE, model_cfg["model_dir"]))
     world_model = build_model(model_cfg, dt=sim_dt, robot=robot_iface)
-    # Reset observer with valid initial base state (zero insertion, zero rotation)
+    # Reset observer with physically meaningful initial state:
+    # z_rest = latent encoding of straight rod (q=0), not z=0
     if world_model.has_observer:
-        init_base = robot_iface.encode_base_state(np.zeros(robot_iface.base_state_raw_dim))
-        world_model.reset(base_state=init_base)
+        encoder = world_model.observation._encoder
+        z_rest = encoder.encode(np.zeros((1, encoder.n_strain))).flatten()
+        init_base = robot_iface.encode_base_state(
+            np.zeros(robot_iface.base_state_raw_dim))
+        world_model.reset(z0=z_rest, base_state=init_base)
 
     # Build reference
     from control.factory import build_reference, build_controller
@@ -317,7 +321,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             n_sections=n_sections,
             rod_length=float(rod_cfg.get("rod", {}).get("length", 0.16)),
             panels=("base_translation", "base_rotation",
-                    "tendon_force", "contact_force"),
+                    "tendon_force", "contact_force", "tracking_error"),
             window_seconds=10.0,
             dt=sim_dt,
             n_cables=n_cables,
@@ -331,6 +335,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
                 reader=reader,
                 n_nodes=n_frames_cfg,
                 base_home_position=robot.base_position,
+                feedback_controller=fb_controller,
             )
         )
 

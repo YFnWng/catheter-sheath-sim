@@ -32,12 +32,15 @@ controller:
     # Kd: [0.1, 0.05, 0.05]
     # anti_windup: 100.0
 
-    # --- MPPI params (requires observer with dynamics model) ---
+    # --- IT-MPC params (requires observer with dynamics model) ---
     horizon: 10
-    n_samples: 100
+    n_samples: 1000
     temperature: 1.0
-    noise_std: [5.0, 10.0, 1.0]
-    terminal_weight: 10.0
+    alpha: 0.0               # 0=all exploit (smooth), 1=all explore (aggressive)
+    noise_std: [0.01, 10.0, 1.0]
+    terminal_weight: 1.0
+    smoothing_window: 5       # Savitzky-Golay window (odd, 0=disable)
+    smoothing_order: 2        # SG polynomial order
 
     # --- AdapJ params ---
     # n_state: 3
@@ -49,7 +52,7 @@ controller:
 
 reference:
   type: fixed                # fixed | waypoints | file
-  target: [0.0, 0.02, 0.06]  # tip xyz position (meters)
+  target: [0.0, 0.0, 0.06]  # tip xyz position (meters)
   # type: waypoints
   # waypoints:
   #   - {t: 0.0, target: [0.0, 0.0, 0.12]}

@@ -34,6 +34,7 @@ class PlotController(Sofa.Core.Controller):
             kwargs.pop("base_home_position", [0.0, 0.0, 0.0]), dtype=float,
         )
         self._tip_force_field = kwargs.pop("tip_force_field", None)
+        self._fb_controller = kwargs.pop("feedback_controller", None)
 
     def onAnimateBeginEvent(self, _event):
         sofa_gt = self._reader.read()
@@ -82,5 +83,10 @@ class PlotController(Sofa.Core.Controller):
             "gt_F": gt_F,
             "tip_load": tip_force_3d,
         }
+
+        # Include tracking error from feedback controller (zeros before first tick)
+        if self._fb_controller is not None:
+            err = self._fb_controller._last_tracking_error
+            plot_data["tracking_error"] = err if err is not None else np.zeros(3)
 
         self._plotter.send(plot_data)
