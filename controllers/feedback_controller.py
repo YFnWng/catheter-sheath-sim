@@ -133,15 +133,16 @@ class FeedbackController(Sofa.Core.Controller):
         if self._cable_constraint is not None:
             self._cable_data = self._cable_constraint.findData("value")
 
-        # Sensor config (for resolving frame indices in _extract_controlled)
-        self._sensor_cfg = kwargs.pop("sensor_config", {})
+        # Sensor config from robot interface (for resolving frame indices)
+        self._sensor_cfg = (self._robot_iface.sensor_config
+                            if self._robot_iface is not None else {})
 
         # AdapJ babbling config
         self._babble_steps = int(kwargs.pop("babble_steps", 0))
-        babble_amp = kwargs.pop("babble_amplitude", None)
-        self._babble_amplitude = (
-            np.asarray(babble_amp, dtype=float)
-            if babble_amp is not None else None)
+        babble_rate = kwargs.pop("babble_max_rate", None)
+        self._babble_max_rate = (
+            np.asarray(babble_rate, dtype=float)
+            if babble_rate is not None else None)
 
         # State
         self._record = TrajectoryRecord()
@@ -160,14 +161,19 @@ class FeedbackController(Sofa.Core.Controller):
         self._last_sofa_gt = None  # cached from previous onAnimateEnd
         self._last_controlled = None  # controlled quantity from last onAnimateEnd
         self._last_readings = None    # sensor readings from last onAnimateEnd
-        self._sensor_writer = None    # set by scene builder for GUI visualization
+        self._display_writer = None   # set by scene builder (shape + sensors)
+        self._shape_source = "observer"  # "observer" or "rollout", set by scene
         self._last_tracking_error = None  # cached for PlotController to read
+
+        # Autoregressive latent rollout state (for debugging dynamics model)
+        self._rollout_state = None  # initialized after observer reset
 
         # Babbling state
         self._babbling = self._babble_steps > 0
         self._babble_states = []
         self._babble_actuations = []
         self._babble_count = 0
+        self._babble_velocity = np.zeros(3)  # momentum for smooth random walk
 
     def _encode_cmd_for_model(self, raw_cmd: np.ndarray) -> np.ndarray:
         """Encode raw joint command for the dynamics/observer model.
@@ -216,16 +222,15 @@ class FeedbackController(Sofa.Core.Controller):
         ref = self._reference.at(t)
         self._last_tracking_error = controlled - ref
 
+        # --- Rate gate: control and babbling run at same cadence as observer ---
+        if self._step % self._control_rate != 0:
+            # Between control ticks: hold last command
+            self._apply_joint_commands(self._joint_cmd)
+            return
+
         # --- Babbling phase (AdapJ) ---
         if self._babbling:
             self._run_babble_step(controlled, t)
-            return
-
-        # --- Control phase ---
-        ctrl_step = self._step - self._warmup_steps
-        if ctrl_step % self._control_rate != 0:
-            # Between control ticks: hold last command
-            self._apply_joint_commands(self._joint_cmd)
             return
 
         self._in_control_phase = True
@@ -261,11 +266,13 @@ class FeedbackController(Sofa.Core.Controller):
         # Extract controlled quantity from sensor readings or raw SOFA state
         self._last_controlled = self._extract_controlled(sofa_gt)
 
-        # Observer update
-        if self._observer is not None and self._step > self._warmup_steps:
+        # Observer update — runs at control rate (matching trained dynamics dt).
+        # Uses absolute step cadence throughout (warmup and control).
+        if (self._observer is not None
+                and self._step > 0
+                and self._step % self._control_rate == 0):
             u_enc = self._encode_cmd_for_model(self._joint_cmd)
             if self._last_readings is not None:
-                # Pass sensor readings dict to observer
                 self._observer.step(u_enc, self._last_readings)
             else:
                 y = self._build_observation(sofa_gt)
@@ -279,14 +286,31 @@ class FeedbackController(Sofa.Core.Controller):
                 self._controller.update(self._last_controlled, self._joint_cmd)
                 self._last_update_time = _time.perf_counter() - t0
 
-        # Update sensor display (if GUI mode with visualization)
-        if (hasattr(self, '_sensor_writer') and self._sensor_writer is not None
-                and self._last_readings is not None):
-            sensor_pts = []
-            for p in self._last_readings.positions.values():
-                sensor_pts.append(np.asarray(p[:3], dtype=float))
-            sensor_arr = np.array(sensor_pts, dtype=float) if sensor_pts else None
-            self._sensor_writer.update_positions(None, sensor_arr)
+        # Update display (sensor markers + ghost catheter shape)
+        if self._display_writer is not None:
+            # Sensor markers
+            sensor_arr = None
+            if self._last_readings is not None:
+                sensor_pts = [np.asarray(p[:3], dtype=float)
+                              for p in self._last_readings.positions.values()]
+                if sensor_pts:
+                    sensor_arr = np.array(sensor_pts, dtype=float)
+
+            # Ghost shape: autoregressive rollout or observer estimate
+            shape_positions = None
+            if (self._observation_model is not None
+                    and self._step > 0
+                    and self._step % self._control_rate == 0):
+                if self._shape_source == "rollout":
+                    self._step_rollout()
+                    state = self._rollout_state
+                else:
+                    state = (self._observer.state
+                             if self._observer is not None else None)
+                if state is not None:
+                    shape_positions = self._decode_shape(state)
+
+            self._display_writer.update_positions(shape_positions, sensor_arr)
 
         # --- Recording ---
         if not self._record_enabled:
@@ -318,19 +342,30 @@ class FeedbackController(Sofa.Core.Controller):
     # ------------------------------------------------------------------
 
     def _run_babble_step(self, controlled: np.ndarray, t: float) -> None:
-        """Execute one motor babbling step for AdapJ initialization."""
+        """Execute one motor babbling step via smooth random walk with momentum.
+
+        Uses a velocity state with random acceleration and damping:
+            vel = momentum * vel + (1 - momentum) * uniform(-max_rate, max_rate)
+            cmd = cmd + vel
+        This produces smooth, sinusoid-like trajectories matching the
+        continuous command profiles seen in training data.
+        """
         self._babble_count += 1
 
         # Record controlled quantity (position or pose)
         self._babble_states.append(controlled.copy())
 
-        # Random actuation
-        if self._babble_amplitude is not None:
-            amp = self._babble_amplitude
+        # Smooth random walk with momentum
+        if self._babble_max_rate is not None:
+            max_rate = self._babble_max_rate
         else:
-            amp = (self._controller.joint_upper -
-                   self._controller.joint_lower) * 0.2
-        cmd = np.random.uniform(-amp, amp)
+            max_rate = (self._controller.joint_upper -
+                        self._controller.joint_lower) * 0.1
+        momentum = 0.9
+        accel = np.random.uniform(-max_rate, max_rate)
+        self._babble_velocity = (momentum * self._babble_velocity
+                                 + (1 - momentum) * accel)
+        cmd = self._joint_cmd + self._babble_velocity
         cmd = np.clip(cmd, self._controller.joint_lower,
                       self._controller.joint_upper)
         self._babble_actuations.append(cmd.copy())
@@ -346,6 +381,34 @@ class FeedbackController(Sofa.Core.Controller):
             self._controller.initialize(states, actuations)
             print(f"[FeedbackController] AdapJ initialized with "
                   f"{len(states)} babbling samples")
+
+    # ------------------------------------------------------------------
+    # Estimated shape rendering
+    # ------------------------------------------------------------------
+
+    def _decode_shape(self, state: np.ndarray) -> np.ndarray:
+        """Decode latent state → FK → node positions (n_nodes, 3)."""
+        obs = self._observation_model
+        d = obs._d
+        z = state[:d]
+        q_flat = obs._encoder.decode(z.reshape(1, -1)).flatten()
+        q = q_flat.reshape(obs._n_sec, 3)
+        base = obs._base_frame_from_state(state)
+        T_all, _, _ = self._robot_iface.forward_kinematics_with_jacobian(q, base)
+        return np.array([T.translation() for T in T_all], dtype=float)
+
+    def _step_rollout(self) -> None:
+        """Advance autoregressive latent rollout by one control step.
+
+        Uses the dynamics model to propagate the rollout state with the
+        current joint command. Initial state set by scene builder.
+        """
+        dynamics = self._world_model.dynamics if self._world_model else None
+        if dynamics is None or self._rollout_state is None:
+            return
+        u_enc = self._encode_cmd_for_model(self._joint_cmd)
+        self._rollout_state = dynamics.predict(
+            self._rollout_state.astype(np.float32), u_enc.astype(np.float32))
 
     # ------------------------------------------------------------------
     # State reading

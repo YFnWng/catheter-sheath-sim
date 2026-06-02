@@ -175,7 +175,8 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         model_cfg = dict(model_cfg)
         model_cfg["model_dir"] = os.path.normpath(
             os.path.join(_WORKSPACE, model_cfg["model_dir"]))
-    world_model = build_model(model_cfg, dt=sim_dt, robot=robot_iface)
+    model_dt = sim_dt * control_rate
+    world_model = build_model(model_cfg, dt=model_dt, robot=robot_iface)
     # Reset observer with physically meaningful initial state:
     # z_rest = latent encoding of straight rod (q=0), not z=0
     if world_model.has_observer:
@@ -236,13 +237,13 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
 
     # AdapJ babbling config
     babble_steps = 0
-    babble_amplitude = None
+    babble_max_rate = None
     if ctrl_cfg.get("type") == "adapj":
         params = ctrl_cfg.get("params", {})
         babble_steps = int(params.get("babble_steps", 100))
-        amp = params.get("babble_amplitude")
-        if amp is not None:
-            babble_amplitude = np.array(amp, dtype=float)
+        rate = params.get("babble_max_rate")
+        if rate is not None:
+            babble_max_rate = np.array(rate, dtype=float)
 
     metadata = {
         "schema_version": 1,
@@ -280,11 +281,21 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         control_rate=control_rate,
         metadata=metadata,
         babble_steps=babble_steps,
-        babble_amplitude=babble_amplitude,
+        babble_max_rate=babble_max_rate,
         duration=duration,
         sensor_config=sensor_cfg,
     )
     root.addObject(fb_controller)
+
+    # Initialize autoregressive rollout state from ground-truth rest config
+    if world_model.has_observer:
+        dynamics = world_model.dynamics
+        d = dynamics.d
+        init_state = np.zeros(dynamics.state_dim, dtype=np.float64)
+        init_state[:d] = z_rest
+        if dynamics._actuation_model is not None:
+            init_state[2*d:2*d + len(init_base)] = init_base
+        fb_controller._rollout_state = init_state
 
     # ── Target + sensor visualization (GUI only) ───────────────────
     if not headless:
@@ -293,19 +304,24 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             target = np.array(ref_cfg["target"], dtype=float)
             _add_target_marker(root, target)
 
-        # Sensor markers
-        if sensor_suite is not None and sensor_suite.n_position_sensors > 0:
-            from utils.sofa_writer import SofaWriter
-            n_sens = sensor_suite.n_position_sensors
-            sensor_node = root.addChild("SensorMarkers")
-            sensor_mo = sensor_node.addObject(
-                "MechanicalObject", name="SensorMO", template="Vec3d",
-                position=[[0, 0, 0]] * n_sens,
-                showObject=True, showObjectScale=5.0,
-                showColor=[1.0, 1.0, 0.2, 1.0],
+        # Ghost catheter + sensor markers (single SofaWriter)
+        vis_cfg = config.get("visualization", {})
+        show_est = vis_cfg.get("show_estimated_shape", False)
+        n_sens = (sensor_suite.n_position_sensors
+                  if sensor_suite is not None else 0)
+        if show_est or n_sens > 0:
+            from utils.sofa_writer import add_estimation_display
+            n_nodes_est = robot_iface.n_sections + 1
+            writer = add_estimation_display(
+                root,
+                n_nodes=n_nodes_est if show_est else 0,
+                ds=robot_iface.ds,
+                n_sensors=n_sens,
+                base_position=robot.base_position,
+                base_orientation=robot.base_orientation,
             )
-            fb_controller._sensor_writer = SofaWriter(
-                shape_mo=None, sensor_mo=sensor_mo)
+            fb_controller._display_writer = writer
+            fb_controller._shape_source = vis_cfg.get("shape_source", "observer")
 
         # Diagnostic plotter
         from utils.plotter import DiagnosticPlotter

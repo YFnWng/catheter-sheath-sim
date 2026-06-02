@@ -84,27 +84,29 @@ def add_estimation_display(
 
     disp = root.addChild("EstimatorDisplay")
 
-    shape_node = disp.addChild("EstimatedShape")
-    shape_mo = shape_node.addObject(
-        "MechanicalObject", name="ShapeMO", template="Vec3d",
-        position=init_shape,
-        showObject=True, showObjectScale=3.0,
-        showColor=[0.0, 1.0, 0.5, 1.0],
-    )
-    shape_node.addObject(
-        "EdgeSetTopologyContainer",
-        edges=[[k, k + 1] for k in range(n_nodes - 1)],
-    )
-    shape_visual = shape_node.addChild("Visual")
-    shape_visual.addObject(
-        "OglModel", name="EstimatedLine",
-        color=[0.0, 1.0, 0.5, 1.0],
-        edges=[[k, k + 1] for k in range(n_nodes - 1)],
-    )
-    shape_visual.addObject(
-        "IdentityMapping",
-        input="@../ShapeMO", output="@EstimatedLine",
-    )
+    shape_mo = None
+    if n_nodes > 0:
+        shape_node = disp.addChild("EstimatedShape")
+        shape_mo = shape_node.addObject(
+            "MechanicalObject", name="ShapeMO", template="Vec3d",
+            position=init_shape,
+            showObject=True, showObjectScale=3.0,
+            showColor=[0.0, 1.0, 0.5, 1.0],
+        )
+        shape_node.addObject(
+            "EdgeSetTopologyContainer",
+            edges=[[k, k + 1] for k in range(n_nodes - 1)],
+        )
+        shape_visual = shape_node.addChild("Visual")
+        shape_visual.addObject(
+            "OglModel", name="EstimatedLine",
+            color=[0.0, 1.0, 0.5, 1.0],
+            edges=[[k, k + 1] for k in range(n_nodes - 1)],
+        )
+        shape_visual.addObject(
+            "IdentityMapping",
+            input="@../ShapeMO", output="@EstimatedLine",
+        )
 
     sensor_mo = None
     if n_sensors > 0:

@@ -24,7 +24,7 @@ model:
   initial_cov: 1.0
 
 controller:
-  type: mppi                # pid | open_loop | mppi | adapj
+  type: adapj                # pid | open_loop | mppi | adapj
   params:
     # --- PID params ---
     # Kp: [1.0, 0.5, 0.2]
@@ -33,22 +33,22 @@ controller:
     # anti_windup: 100.0
 
     # --- IT-MPC params (requires observer with dynamics model) ---
-    horizon: 10
-    n_samples: 1000
-    temperature: 1.0
-    alpha: 0.0               # 0=all exploit (smooth), 1=all explore (aggressive)
-    noise_std: [0.01, 10.0, 1.0]
-    terminal_weight: 1.0
-    smoothing_window: 5       # Savitzky-Golay window (odd, 0=disable)
-    smoothing_order: 2        # SG polynomial order
+    # horizon: 10
+    # n_samples: 1024
+    # temperature: 1.0
+    # alpha: 0.0               # 0=all exploit (smooth), 1=all explore (aggressive)
+    # noise_std: [0.1, 10.0, 1.0]
+    # terminal_weight: 1.0
+    # smoothing_window: 5       # Savitzky-Golay window (odd, 0=disable)
+    # smoothing_order: 2        # SG polynomial order
 
     # --- AdapJ params ---
-    # n_state: 3
-    # max_delta: 0.1
-    # rho: 1.0
-    # angular_indices: [1]                  # joints with angular values (deg), encoded as cos/sin internally
-    # babble_steps: 100
-    # babble_amplitude: [10.0, 30.0, 5.0]  # [insertion_mm, rotation_deg, cable]
+    n_state: 3
+    max_delta: 0.1
+    rho: 1.0
+    angular_indices: [1]                  # joints with angular values (deg), encoded as cos/sin internally
+    babble_steps: 100
+    babble_max_rate: [0.005, 30.0, 8.0]  # max per-step change [insertion_m, rotation_deg, cable_N]
 
 reference:
   type: fixed                # fixed | waypoints | file
@@ -64,7 +64,11 @@ reference:
 output:
   record: false               # set to false to skip H5 recording
   dir: ./feedback_data
-  warmup_steps: 0
+  warmup_steps: 200
+
+visualization:
+  show_estimated_shape: true    # render ghost catheter shape
+  shape_source: observer         # observer | rollout (autoregressive dynamics)
 
 simulation:
   duration: 30.0

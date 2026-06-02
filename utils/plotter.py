@@ -104,27 +104,22 @@ def _build_contact_force(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, li
 
 def _build_base_translation(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
     import pyqtgraph as pg
-    # Command curves use lighter/thinner pen (OpenGL ignores dash patterns)
-    _C_light = [(255, 120, 120), (120, 255, 120), (120, 120, 255)]
-    p = _make_panel(win, "Base translation", "m", xlabel="t (s)")
-    bt = [p.plot([], [], pen=pg.mkPen(_C[i], width=2), name=l)
-          for i, l in enumerate("XYZ")]
-    bt_rest = [p.plot([], [], pen=pg.mkPen(_C_light[i], width=1),
-                       name=f"{l} cmd")
-               for i, l in enumerate("XYZ")]
-    return dict(bt=bt, bt_rest=bt_rest)
+    p = _make_panel(win, "Base insertion", "m", xlabel="t (s)")
+    # Actual (SOFA), command (rest_position), estimated (observer/rollout)
+    bt = [p.plot([], [], pen=pg.mkPen((0, 0, 200), width=2), name="actual")]
+    bt_rest = [p.plot([], [], pen=pg.mkPen((150, 150, 200), width=1), name="cmd")]
+    bt_est = [p.plot([], [], pen=pg.mkPen((200, 0, 0), width=2), name="estimated")]
+    return dict(bt=bt, bt_rest=bt_rest, bt_est=bt_est)
 
 
 def _build_base_rotation(win, s_n, s_s, zeros_n, zeros_s, **_kw) -> Dict[str, list]:
     import pyqtgraph as pg
-    _C_light = [(255, 120, 120), (120, 255, 120), (120, 120, 255)]
     p = _make_panel(win, "Base rotation", "deg", xlabel="t (s)")
-    br = [p.plot([], [], pen=pg.mkPen(_C[i], width=2), name=l)
-          for i, l in enumerate(["Roll", "Pitch", "Yaw"])]
-    br_rest = [p.plot([], [], pen=pg.mkPen(_C_light[i], width=1),
-                       name=f"{l} cmd")
-               for i, l in enumerate(["Roll", "Pitch", "Yaw"])]
-    return dict(br=br, br_rest=br_rest)
+    # Actual, command, estimated — rotation around insertion axis only
+    br = [p.plot([], [], pen=pg.mkPen((0, 0, 200), width=2), name="actual")]
+    br_rest = [p.plot([], [], pen=pg.mkPen((150, 150, 200), width=1), name="cmd")]
+    br_est = [p.plot([], [], pen=pg.mkPen((200, 0, 0), width=2), name="estimated")]
+    return dict(br=br, br_rest=br_rest, br_est=br_est)
 
 
 def _build_tendon_force(win, s_n, s_s, zeros_n, zeros_s, **kw) -> Dict[str, list]:
@@ -204,6 +199,8 @@ _TS_CURVE_KEYS = {
     "base_rot": "br",
     "base_rest_pos": "bt_rest",
     "base_rest_rot": "br_rest",
+    "base_est_pos": "bt_est",
+    "base_est_rot": "br_est",
     "cable_tensions": "tf",
     "total_contact": "tcf",
     "total_contact_norm": "tcf_norm",
@@ -260,8 +257,10 @@ def _apply(curves: Dict[str, list], data: dict, s_n, s_s, ts_bufs):
 
     Time-series keys (x = rolling time buffer):
         t          : scalar — current simulation time
-        base_pos   : (3,)   — base translation [x,y,z]
-        base_rot   : (3,)   — base rotation [roll,pitch,yaw] in degrees
+        base_pos   : (1,)   — base insertion (m)
+        base_rot   : (1,)   — base rotation (deg)
+        base_est_pos : (1,) — estimated base insertion (m)
+        base_est_rot : (1,) — estimated base rotation (deg)
         cable_tensions : (n,) — tendon forces
         total_contact  : (3,) — total contact force [fx,fy,fz]
     """

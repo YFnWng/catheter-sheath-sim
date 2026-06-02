@@ -45,14 +45,15 @@ class PlotController(Sofa.Core.Controller):
         base_pos = sofa_gt.base_pose[:3] - self._base_home
         base_rot_deg = R.from_quat(sofa_gt.base_pose[3:7]).as_euler("xyz", degrees=True)
 
-        # Rest (command target) pose
-        base_mo = self._reader._base_mo
-        base_rest_pos = np.zeros(3)
-        base_rest_rot_deg = np.zeros(3)
-        if hasattr(base_mo, "rest_position") and len(base_mo.rest_position.value) > 0:
-            rest = np.array(base_mo.rest_position.value[0], dtype=float)
-            base_rest_pos = rest[:3] - self._base_home
-            base_rest_rot_deg = R.from_quat(rest[3:7]).as_euler("xyz", degrees=True)
+        # Command from joint_cmd
+        joint_cmd = np.zeros(3)
+        if self._fb_controller is not None:
+            joint_cmd = self._fb_controller._joint_cmd
+
+        insertion_actual = float(np.linalg.norm(base_pos))
+        rotation_actual = float(base_rot_deg[2])
+        insertion_cmd = float(joint_cmd[0])
+        rotation_cmd = float(joint_cmd[1])
 
         # Cable tensions
         if sofa_gt.cable_tensions is not None:
@@ -70,23 +71,58 @@ class PlotController(Sofa.Core.Controller):
             forces = np.array(self._tip_force_field.findData("forces").value)
             if forces.size >= 3:
                 tip_force_3d = forces.flat[:3].copy()
-                # Add tip load to the last node in the spatial plot
                 gt_F[-1] += tip_force_3d
 
         plot_data = {
             "t": t,
-            "base_pos": base_pos,
-            "base_rot": base_rot_deg,
-            "base_rest_pos": base_rest_pos,
-            "base_rest_rot": base_rest_rot_deg,
+            "base_pos": np.array([insertion_actual]),
+            "base_rot": np.array([rotation_actual]),
+            "base_rest_pos": np.array([insertion_cmd]),
+            "base_rest_rot": np.array([rotation_cmd]),
             "cable_tensions": cable_tensions,
             "gt_F": gt_F,
             "tip_load": tip_force_3d,
         }
 
-        # Include tracking error from feedback controller (zeros before first tick)
+        # Estimated base state from observer/rollout
         if self._fb_controller is not None:
             err = self._fb_controller._last_tracking_error
             plot_data["tracking_error"] = err if err is not None else np.zeros(3)
 
+            # Extract estimated base insertion + rotation from latent state
+            est_ins, est_rot = self._extract_estimated_base()
+            if est_ins is not None:
+                plot_data["base_est_pos"] = np.array([est_ins])
+                plot_data["base_est_rot"] = np.array([est_rot])
+
         self._plotter.send(plot_data)
+
+    def _extract_estimated_base(self):
+        """Extract estimated insertion (m) and rotation (deg) from the
+        feedback controller's current display state (observer or rollout)."""
+        fb = self._fb_controller
+        if fb is None:
+            return None, None
+
+        # Pick the same source as the ghost shape display
+        source = getattr(fb, '_shape_source', 'observer')
+        if source == 'rollout' and fb._rollout_state is not None:
+            state = fb._rollout_state
+        elif fb._observer is not None:
+            state = fb._observer.state
+        else:
+            return None, None
+
+        obs = fb._observation_model
+        if obs is None:
+            return None, None
+
+        d = obs._d
+        if len(state) <= 2 * d:
+            return None, None  # no base state in latent vector
+
+        # Encoded base position: [insertion, cos(rot), sin(rot)]
+        base_enc = state[2 * d:2 * d + 3]
+        insertion = float(base_enc[0])
+        rotation_deg = float(np.degrees(np.arctan2(base_enc[2], base_enc[1])))
+        return insertion, rotation_deg
