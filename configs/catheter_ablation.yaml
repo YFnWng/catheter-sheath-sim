@@ -35,9 +35,9 @@ actuation:
   cable_point_count: 33      # number of guide points per cable
   # Keyboard controller
   insertion_direction: [0.0, 0.0, 1.0]  # unit vector in local frame
-  insertion_speed: 30.0e-3   # m/s  (was 30 mm/s)
+  insertion_speed: 50.0e-3   # m/s  (was 30 mm/s)
   max_travel: 80.0e-3       # m    (was 160 mm)
-  rotation_speed: 30.0       # deg/s
+  rotation_speed: 40.0       # deg/s
   max_rotation: 180.0        # degrees
 
   displacement:
@@ -48,7 +48,7 @@ actuation:
   force:
     pull_min: 0.0            # N
     pull_max: 50.0           # N    (was 5 N with mm units)
-    pull_increment: 3.0    # N/s
+    pull_increment: 5.0    # N/s
 
 # Random tip force perturbation during data collection.
 # Smooth band-limited force applied to the rod tip (sum of sinusoids).

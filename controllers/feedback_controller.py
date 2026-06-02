@@ -242,7 +242,8 @@ class FeedbackController(Sofa.Core.Controller):
         else:
             ctrl_state = controlled
         t0 = _time.perf_counter()
-        self._joint_cmd = self._controller.compute(ctrl_state, ref, t)
+        raw_cmd = self._controller.compute(ctrl_state, ref, t)
+        self._joint_cmd = self._controller.rate_limit(raw_cmd)
         self._last_compute_time = _time.perf_counter() - t0
 
         self._apply_joint_commands(self._joint_cmd)
@@ -365,6 +366,10 @@ class FeedbackController(Sofa.Core.Controller):
         accel = np.random.uniform(-max_rate, max_rate)
         self._babble_velocity = (momentum * self._babble_velocity
                                  + (1 - momentum) * accel)
+        if self._controller.max_rate is not None:
+            self._babble_velocity = np.clip(
+                self._babble_velocity,
+                -self._controller.max_rate, self._controller.max_rate)
         cmd = self._joint_cmd + self._babble_velocity
         cmd = np.clip(cmd, self._controller.joint_lower,
                       self._controller.joint_upper)
@@ -379,6 +384,8 @@ class FeedbackController(Sofa.Core.Controller):
             states = np.array(self._babble_states)
             actuations = np.array(self._babble_actuations)
             self._controller.initialize(states, actuations)
+            # Seed rate limiter so first control command doesn't jump
+            self._controller._prev_cmd = self._joint_cmd.copy()
             print(f"[FeedbackController] AdapJ initialized with "
                   f"{len(states)} babbling samples")
 

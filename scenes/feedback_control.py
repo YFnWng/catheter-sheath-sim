@@ -200,7 +200,8 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         control_mode=control_mode,
         control_sensor=control_sensor,
         control_sensor_index=control_sensor_index,
-        robot=robot_iface)
+        robot=robot_iface,
+        dt=model_dt)
 
     # Output path
     out_cfg = config.get("output", {})
