@@ -304,6 +304,17 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
         if ref_type == "fixed":
             target = np.array(ref_cfg["target"], dtype=float)
             _add_target_marker(root, target)
+        elif ref_type in ("circle", "rectangle", "waypoints", "file"):
+            sphere_mo, sphere_offsets = _add_path_marker(root, reference)
+            if sphere_mo is not None:
+                fb_controller._target_sphere_mo = sphere_mo
+                fb_controller._target_sphere_offsets = sphere_offsets
+
+            # Diagnostic spheres: +rot (green) and -rot (blue) weighted predictions
+            diag_pos_mo, diag_neg_mo, diag_offsets = _add_diag_spheres(root)
+            fb_controller._diag_pos_sphere_mo = diag_pos_mo
+            fb_controller._diag_neg_sphere_mo = diag_neg_mo
+            fb_controller._diag_sphere_offsets = diag_offsets
 
         # Ghost catheter + sensor markers (single SofaWriter)
         vis_cfg = config.get("visualization", {})
@@ -399,7 +410,7 @@ def _make_sphere_mesh(center, radius, n_lat=8, n_lon=12):
 
 def _add_target_marker(root, position: np.ndarray):
     """Add a visual sphere at the target position."""
-    verts, tris = _make_sphere_mesh(position, radius=0.003)
+    verts, tris = _make_sphere_mesh(position, radius=0.001)
     target_node = root.addChild("TargetMarker")
     target_node.addObject(
         "OglModel",
@@ -408,6 +419,93 @@ def _add_target_marker(root, position: np.ndarray):
         triangles=tris,
         color=[1.0, 0.2, 0.2, 0.8],
     )
+
+
+def _add_path_marker(root, reference):
+    """Render a reference trajectory as a polyline with a moving target sphere.
+
+    Returns (ogl_model, vertex_offsets) for the moving sphere so the
+    feedback controller can update its position each timestep.
+    """
+    targets = reference.targets  # (N, 3)
+    N = len(targets)
+    if N < 2:
+        return None, None
+
+    edges = [[i, i + 1] for i in range(N - 1)]
+    path_node = root.addChild("PathMarker")
+    path_node.addObject(
+        "OglModel",
+        name="pathLine",
+        position=targets.tolist(),
+        edges=edges,
+        color=[1.0, 0.3, 0.3, 0.9],
+        lineWidth=2.0,
+    )
+
+    # Moving target sphere — MO + IdentityMapping so SOFA re-renders
+    origin = np.zeros(3)
+    verts, tris = _make_sphere_mesh(origin, radius=0.001)
+    offsets = np.array(verts, dtype=float)
+    init_verts = (offsets + targets[0]).tolist()
+    sphere_node = path_node.addChild("MovingTarget")
+    sphere_mo = sphere_node.addObject(
+        "MechanicalObject", name="TargetMO", template="Vec3d",
+        position=init_verts,
+    )
+    vis = sphere_node.addChild("Visual")
+    vis.addObject(
+        "OglModel", name="targetSphere",
+        triangles=tris,
+        color=[1.0, 0.2, 0.2, 0.9],
+    )
+    vis.addObject(
+        "IdentityMapping",
+        input="@../TargetMO", output="@targetSphere",
+    )
+    return sphere_mo, offsets
+
+
+def _add_diag_spheres(root):
+    """Add two diagnostic spheres for MPPI +rot/-rot weighted tip predictions."""
+    origin = np.zeros(3)
+    verts, tris = _make_sphere_mesh(origin, radius=0.0008)
+    offsets = np.array(verts, dtype=float)
+    init_verts = offsets.tolist()
+
+    diag_node = root.addChild("DiagSpheres")
+
+    # +rot sphere (green)
+    pos_node = diag_node.addChild("PosRot")
+    pos_mo = pos_node.addObject(
+        "MechanicalObject", name="PosRotMO", template="Vec3d",
+        position=init_verts,
+    )
+    pos_vis = pos_node.addChild("Visual")
+    pos_vis.addObject(
+        "OglModel", name="posRotSphere", triangles=tris,
+        color=[0.2, 1.0, 0.2, 0.9],
+    )
+    pos_vis.addObject(
+        "IdentityMapping", input="@../PosRotMO", output="@posRotSphere",
+    )
+
+    # -rot sphere (blue)
+    neg_node = diag_node.addChild("NegRot")
+    neg_mo = neg_node.addObject(
+        "MechanicalObject", name="NegRotMO", template="Vec3d",
+        position=init_verts,
+    )
+    neg_vis = neg_node.addChild("Visual")
+    neg_vis.addObject(
+        "OglModel", name="negRotSphere", triangles=tris,
+        color=[0.2, 0.2, 1.0, 0.9],
+    )
+    neg_vis.addObject(
+        "IdentityMapping", input="@../NegRotMO", output="@negRotSphere",
+    )
+
+    return pos_mo, neg_mo, offsets
 
 
 # ── Headless runner ──────────────────────────────────────────────────

@@ -164,6 +164,11 @@ class FeedbackController(Sofa.Core.Controller):
         self._display_writer = None   # set by scene builder (shape + sensors)
         self._shape_source = "observer"  # "observer" or "rollout", set by scene
         self._last_tracking_error = None  # cached for PlotController to read
+        self._target_sphere_mo = None     # set by scene builder for path viz
+        self._target_sphere_offsets = None
+        self._diag_pos_sphere_mo = None   # +rot weighted tip prediction
+        self._diag_neg_sphere_mo = None   # -rot weighted tip prediction
+        self._diag_sphere_offsets = None
 
         # Autoregressive latent rollout state (for debugging dynamics model)
         self._rollout_state = None  # initialized after observer reset
@@ -235,14 +240,30 @@ class FeedbackController(Sofa.Core.Controller):
 
         self._in_control_phase = True
 
+        # Update integral error correction for model-bias compensation
+        control_dt = dt * self._control_rate
+        if (self._last_tracking_error is not None
+                and hasattr(self._controller, 'update_tracking_error')):
+            self._controller.update_tracking_error(
+                self._last_tracking_error, control_dt)
+
         # Model-based controllers need the full latent state from the observer;
         # model-free controllers operate on raw sensor measurements.
         if self._controller.needs_latent_state and self._observer is not None:
             ctrl_state = self._observer.state.copy()
         else:
             ctrl_state = controlled
+
+        # Build reference sequence over the horizon for trajectory-aware cost
+        horizon = getattr(self._controller, 'horizon', 0)
+        if horizon > 0:
+            ref_seq = np.stack([self._reference.at(t + h * control_dt)
+                                for h in range(horizon)])
+        else:
+            ref_seq = ref
+
         t0 = _time.perf_counter()
-        raw_cmd = self._controller.compute(ctrl_state, ref, t)
+        raw_cmd = self._controller.compute(ctrl_state, ref_seq, self._joint_cmd, t)
         self._joint_cmd = self._controller.rate_limit(raw_cmd)
         self._last_compute_time = _time.perf_counter() - t0
 
@@ -312,6 +333,23 @@ class FeedbackController(Sofa.Core.Controller):
                     shape_positions = self._decode_shape(state)
 
             self._display_writer.update_positions(shape_positions, sensor_arr)
+
+        # Update moving target sphere along reference path
+        if self._target_sphere_mo is not None:
+            ref_pos = self._reference.at(t)
+            self._target_sphere_mo.position.value = (
+                self._target_sphere_offsets + ref_pos)
+
+        # Update diagnostic spheres: MPPI-weighted +rot/-rot tip predictions
+        if self._diag_pos_sphere_mo is not None:
+            diag_pos = getattr(self._controller, '_diag_tip_pos_rot', None)
+            diag_neg = getattr(self._controller, '_diag_tip_neg_rot', None)
+            if diag_pos is not None:
+                self._diag_pos_sphere_mo.position.value = (
+                    self._diag_sphere_offsets + diag_pos)
+            if diag_neg is not None:
+                self._diag_neg_sphere_mo.position.value = (
+                    self._diag_sphere_offsets + diag_neg)
 
         # --- Recording ---
         if not self._record_enabled:

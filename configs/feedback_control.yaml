@@ -28,36 +28,52 @@ controller:
   params:
     # --- PID params ---
     # Kp: [1.0, 0.5, 0.2]
-    # Ki: [0.01, 0.01, 0.0]
+    Ki: 0.0
     # Kd: [0.1, 0.05, 0.05]
-    # anti_windup: 100.0
+    anti_windup: 0.01
 
     # --- IT-MPC params (requires observer with dynamics model) ---
-    horizon: 20
+    horizon: 40
     n_samples: 2048
-    temperature: 0.1
+    temperature: 0.001
     alpha: 0.0               # 0=all exploit (smooth), 1=all explore (aggressive)
     # noise_std: defaults to max_rate from robot config
     terminal_weight: 1.0
+    discount: 1.0             # per-step geometric discount (1.0=uniform, <1 myopic)
     smoothing_window: 5       # Savitzky-Golay window (odd, 0=disable)
     smoothing_order: 2        # SG polynomial order
 
     # --- AdapJ params ---
-    # n_state: 3
-    # max_delta: 0.1
-    # rho: 1.0
-    # angular_indices: [1]                  # joints with angular values (deg), encoded as cos/sin internally
-    # babble_steps: 100
-    # babble_max_rate: [0.005, 30.0, 8.0]  # max per-step change [insertion_m, rotation_deg, cable_N]
+    n_state: 3
+    max_delta: 0.1
+    rho: 1.0
+    angular_indices: [1]                  # joints with angular values (deg), encoded as cos/sin internally
+    babble_steps: 100
+    babble_max_rate: [0.005, 30.0, 8.0]  # max per-step change [insertion_m, rotation_deg, cable_N]
 
 reference:
-  type: fixed                # fixed | waypoints | file
-  target: [0.0, 0.0, 0.06]  # tip xyz position (meters)
+  # type: fixed                # fixed | waypoints | file
+  # target: [0.02, 0.02, 0.06]  # tip xyz position (meters)
+
+  type: circle
+  center: [0.0, 0.0, 0.05]
+  radius: 0.02
+  plane: "xy"
+  duration: 70.0
+
+  # type: rectangle
+  # center: [0.0, 0.0, 0.05]
+  # width: 0.02
+  # height: 0.02
+  # plane: "xy"
+  # duration: 100.0
+
   # type: waypoints
   # waypoints:
   #   - {t: 0.0, target: [0.0, 0.0, 0.12]}
   #   - {t: 10.0, target: [0.01, 0.0, 0.13]}
   #   - {t: 20.0, target: [0.0, 0.0, 0.12]}
+
   # type: file
   # path: reference_trajectory.npy
 
@@ -71,6 +87,6 @@ visualization:
   shape_source: observer         # observer | rollout (autoregressive dynamics)
 
 simulation:
-  duration: 50.0
+  duration: 100.0
   dt: 0.01
   control_rate: 10            # run controller every N sim steps
