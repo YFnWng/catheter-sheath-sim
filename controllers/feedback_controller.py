@@ -583,6 +583,10 @@ class FeedbackController(Sofa.Core.Controller):
 
     def _finish(self) -> None:
         self._done = True
+
+        if hasattr(self._controller, 'save_actuation_diagnostic'):
+            self._controller.save_actuation_diagnostic()
+
         if not self._record_enabled:
             print("[FeedbackController] Done (recording disabled).")
             return

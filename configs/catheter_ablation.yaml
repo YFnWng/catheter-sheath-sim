@@ -38,7 +38,7 @@ actuation:
   insertion_speed: 50.0e-3   # m/s  (was 30 mm/s)
   max_travel: 80.0e-3       # m    (was 160 mm)
   rotation_speed: 40.0       # deg/s
-  max_rotation: 180.0        # degrees
+  max_rotation: 360.0        # degrees
 
   displacement:
     pull_min: 0.0            # m

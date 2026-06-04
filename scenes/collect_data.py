@@ -446,6 +446,10 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             import inspect
             if "duration" in inspect.signature(gen_cls.__init__).parameters:
                 gen_kwargs["duration"] = duration
+        if hasattr(robot, "joint_rate"):
+            import inspect
+            if "joint_max_speeds" in inspect.signature(gen_cls.__init__).parameters:
+                gen_kwargs["joint_max_speeds"] = np.array(robot.joint_rate, dtype=float)
         generator = gen_cls(joint_lower, joint_upper, dt, **gen_kwargs)
         if isinstance(enable_control, list):
             # Per-joint mask: e.g. [false, true, true]
@@ -588,6 +592,7 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
                 n_nodes=n_nodes,
                 base_home_position=robot.base_position,
                 tip_force_field=tip_force_field,
+                data_collector=controller if not init_mode else None,
             )
         )
 

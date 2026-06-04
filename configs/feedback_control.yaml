@@ -16,10 +16,13 @@ model:
   observer: ukf              # none | ekf | ukf | gru
   model_dir: state_estimation/training/learned_libraries/latent
   data_stem: full_control_tip
-  dynamics_model: mlp_full_control_tip.npz
+  model_prefix: structured
+  dynamics_model: structured_full_control_tip.npz
   # Q and R are loaded from model npz files if available.
   # Fallback scalars when not saved in files:
   process_noise: 0.01
+  # Per-component Q floor for base states: [ins, cos, sin, ins_vel, rot_vel]
+  process_noise_base_floor: [0, 1.0e-3, 1.0e-3, 0, 1.0e-3]
   measurement_noise: 0.1
   initial_cov: 1.0
 
@@ -84,7 +87,7 @@ output:
 
 visualization:
   show_estimated_shape: true    # render ghost catheter shape
-  shape_source: observer         # observer | rollout (autoregressive dynamics)
+  shape_source: observer        # observer | rollout (autoregressive dynamics)
 
 simulation:
   duration: 100.0

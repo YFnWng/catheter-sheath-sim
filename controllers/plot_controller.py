@@ -35,6 +35,9 @@ class PlotController(Sofa.Core.Controller):
         )
         self._tip_force_field = kwargs.pop("tip_force_field", None)
         self._fb_controller = kwargs.pop("feedback_controller", None)
+        self._data_collector = kwargs.pop("data_collector", None)
+        self._prev_est_rot_raw = None
+        self._est_rot_unwrapped = 0.0
 
     def onAnimateBeginEvent(self, _event):
         sofa_gt = self._reader.read()
@@ -45,10 +48,12 @@ class PlotController(Sofa.Core.Controller):
         base_pos = sofa_gt.base_pose[:3] - self._base_home
         base_rot_deg = R.from_quat(sofa_gt.base_pose[3:7]).as_euler("xyz", degrees=True)
 
-        # Command from joint_cmd
+        # Command from joint_cmd (feedback controller or data collector)
         joint_cmd = np.zeros(3)
         if self._fb_controller is not None:
             joint_cmd = self._fb_controller._joint_cmd
+        elif self._data_collector is not None:
+            joint_cmd = self._data_collector._joint_cmd
 
         insertion_actual = float(np.linalg.norm(base_pos))
         rotation_actual = float(base_rot_deg[2])
@@ -124,5 +129,18 @@ class PlotController(Sofa.Core.Controller):
         # Encoded base position: [insertion, cos(rot), sin(rot)]
         base_enc = state[2 * d:2 * d + 3]
         insertion = float(base_enc[0])
-        rotation_deg = float(np.degrees(np.arctan2(base_enc[2], base_enc[1])))
-        return insertion, rotation_deg
+        raw_deg = float(np.degrees(np.arctan2(base_enc[2], base_enc[1])))
+
+        # Unwrap: arctan2 returns [-180, 180] but ground truth is cumulative
+        if self._prev_est_rot_raw is not None:
+            delta = raw_deg - self._prev_est_rot_raw
+            if delta > 180:
+                delta -= 360
+            elif delta < -180:
+                delta += 360
+            self._est_rot_unwrapped += delta
+        else:
+            self._est_rot_unwrapped = raw_deg
+        self._prev_est_rot_raw = raw_deg
+
+        return insertion, self._est_rot_unwrapped
