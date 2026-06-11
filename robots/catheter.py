@@ -221,8 +221,12 @@ def _build(
     solver_node = root.addChild("CatheterSimulation")
     rayleigh_stiffness = float(rod_cfg.get("rayleigh_stiffness", rod_cfg.get("rayleigh", 0.05)))
     rayleigh_mass = float(rod_cfg.get("rayleigh_mass", 1e-3))
+    import os
+    solver_type = ("DiagnosticEulerImplicitSolver"
+                   if os.environ.get("COLLECT_DIAGNOSTIC_SOLVER")
+                   else "EulerImplicitSolver")
     solver_node.addObject(
-        "EulerImplicitSolver",
+        solver_type,
         rayleighStiffness=rayleigh_stiffness,
         rayleighMass=rayleigh_mass,
     )

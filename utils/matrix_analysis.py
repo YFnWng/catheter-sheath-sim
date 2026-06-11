@@ -49,7 +49,9 @@ def extract_matrices(robot, solver_node):
     prefab = robot._prefab
 
     # Rayleigh damping coefficients
-    euler_solver = solver_node.getObject("EulerImplicitSolver")
+    euler_solver = solver_node.getObject("DiagnosticEulerImplicitSolver")
+    if euler_solver is None:
+        euler_solver = solver_node.getObject("EulerImplicitSolver")
     alpha = float(euler_solver.rayleighMass.value)
     beta = float(euler_solver.rayleighStiffness.value)
 
@@ -103,11 +105,14 @@ def extract_matrices(robot, solver_node):
     A_strain = A_full[offset:offset + n_strain, offset:offset + n_strain]
 
     # For implicit Euler with step h and Rayleigh damping:
-    #   A = M_eff * (1 + h*alpha) + K * (h*beta + h^2)
+    #   A = M_eff * (1 + h*alpha) + K * h*(h + beta_solver + beta_ff)
+    # where beta_ff is the per-ForceField rayleighStiffness (enters via
+    # kFactorIncludingRayleighDamping in addKToMatrix).
     # Solve for M_eff:
     dt = float(solver_node.getRoot().dt.value)
+    beta_ff = float(beam_ff.rayleighStiffness.value)
     coeff_M = 1.0 + dt * alpha
-    coeff_K = dt * beta + dt * dt
+    coeff_K = dt * (dt + beta + beta_ff)
 
     M = (A_strain - coeff_K * K) / coeff_M
 

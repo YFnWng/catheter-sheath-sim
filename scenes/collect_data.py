@@ -87,6 +87,7 @@ from robots.catheter import CatheterRobot
 
 from data_collection.generators import SweepGenerator, SinusoidalGenerator
 from data_collection.collector import DataCollectorController
+from data_collection.matrix_recorder import MatrixRecorderController
 
 from utils.sofa_reader import SofaReader
 from utils.plotter import DiagnosticPlotter
@@ -531,6 +532,20 @@ def createScene(root: Sofa.Core.Node, headless: bool = False,
             tip_force_max=tip_force_max,
         )
         root.addObject(controller)
+
+        # Matrix recorder (enabled via COLLECT_MATRICES=1)
+        record_matrices = os.environ.get("COLLECT_MATRICES", "0") == "1"
+        if record_matrices:
+            solver_node_obj = root.getChild("CatheterSimulation")
+            A_interval = int(os.environ.get("COLLECT_A_INTERVAL", "1"))
+            matrix_recorder = MatrixRecorderController(
+                name="MatrixRecorder",
+                robot=robot,
+                solver_node=solver_node_obj,
+                A_interval=A_interval,
+            )
+            root.addObject(matrix_recorder)
+
         title = f"Data Collection — {tag}"
 
     # ── Matrix analysis (GUI modes only, runs once after init) ────────
@@ -711,6 +726,23 @@ def _run_one_scene(scene_dict, scene_idx, total_scenes, output_dir=""):
 
     elapsed = time.time() - t0
     print(f"  Done: {step} steps in {elapsed:.1f}s ({step / elapsed:.0f} steps/s)")
+
+    # Save matrix data if recorded
+    matrix_recorder = root.getObject("MatrixRecorder")
+    if matrix_recorder is not None:
+        import h5py
+        import json as _json
+        mat_data = matrix_recorder.get_data()
+        mat_meta = matrix_recorder.get_metadata()
+        h5_path = controller._output_path
+        print(f"  Appending matrix data to {h5_path}")
+        with h5py.File(h5_path, "a") as f:
+            grp = f.create_group("matrices")
+            for name, arr in mat_data.items():
+                if arr is not None and arr.size > 0:
+                    grp.create_dataset(name, data=arr, compression="gzip",
+                                       compression_opts=4)
+            grp.attrs["metadata"] = _json.dumps(mat_meta)
 
     Sofa.Simulation.unload(root)
     return step, elapsed
